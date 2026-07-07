@@ -66,6 +66,12 @@ private:
     void RenderPlain(class Viewport* viewport);
     void RenderHeightfield(class Viewport* viewport);
 
+    // CSM shadow-receiver: draws the heightfield as a blended darkening pass that
+    // samples the cascaded shadow map. Used instead of the blob path when
+    // mShadowMode == 2. The terrain never casts, so it cannot self-shadow /
+    // double-darken the baked panorama shadows.
+    void RenderShadowCsm(class Viewport* viewport);
+
     void CalculateLightmapTexture(unsigned int size, float gamma, const char* basicTexture, Vector3& plainColour, class LoadingScreenHelper* loadingScreen);
 
     void InitPhysics(class LoadingScreenHelper* loadingScreen);
@@ -79,6 +85,13 @@ private:
 
     Texture mHeightfieldTexture;
     Texture mDetailTexture;
+
+    // Opt-in terrain splatting layer albedos (loaded when the terrain settings
+    // carry a non-empty <TerrainLayers> block). mNumLayerTextures == 0 means the
+    // legacy dual-texture terrain path is used.
+    static const int mMaxLayerTextures = 4;
+    Texture mLayerTextures[mMaxLayerTextures];
+    int     mNumLayerTextures;
 
     static const int mNumPlainPts = 11;
     GLfloat mPlainPts[mNumPlainPts*3];

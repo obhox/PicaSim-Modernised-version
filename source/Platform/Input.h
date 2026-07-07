@@ -177,6 +177,9 @@ public:
         // Get gamepad button state
         bool IsGamepadButtonDown(int gamepadIndex, int button) const;
 
+        // Get the SDL name of a connected gamepad ("" if out of range)
+        std::string GetGamepadName(int gamepadIndex) const;
+
         // Gamepad axis indices
         enum GamepadAxis
         {
@@ -199,6 +202,9 @@ public:
         int GetJoystickAxisCount(int index) const;
         int GetJoystickButtonCount(int index) const;
         int GetJoystickHatCount(int index) const;
+
+        // Get the SDL name of a connected raw joystick ("" if out of range)
+        std::string GetJoystickName(int joystickIndex) const;
 
         // Get joystick input values
         float GetJoystickAxis(int joystickIndex, int axis) const;

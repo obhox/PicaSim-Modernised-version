@@ -4,6 +4,7 @@
 #include "Framework.h"
 #include "Terrain.h"
 #include "Skybox.h"
+#include "ProceduralSky.h"
 #include "ThermalManager.h"
 #include "Runway.h"
 
@@ -107,6 +108,10 @@ private:
 
     // Note that the skybox can be a panorama or a simple skybox
     Skybox mSkybox;
+
+    // Non-null only when the environment specifies a <DynamicSky> element; in that
+    // case it replaces the photo skybox at RENDER_LEVEL_SKYBOX and drives the sun.
+    ProceduralSky* mProceduralSky;
 
     Vector3 mWindDirection;
 

@@ -598,6 +598,14 @@ bool Input::IsGamepadButtonDown(int gamepadIndex, int button) const
     return SDL_GameControllerGetButton(mGamepads[gamepadIndex], sdlButton) != 0;
 }
 
+std::string Input::GetGamepadName(int gamepadIndex) const
+{
+    if (!IsGamepadConnected(gamepadIndex))
+        return std::string();
+    const char* name = SDL_GameControllerName(mGamepads[gamepadIndex]);
+    return name ? std::string(name) : std::string();
+}
+
 void Input::OpenGamepads()
 {
     int numJoysticks = SDL_NumJoysticks();
@@ -715,6 +723,16 @@ bool Input::IsJoystickButtonDown(int index, int button) const
         return SDL_JoystickGetButton(mJoysticks[index], button) != 0;
     }
     return false;
+}
+
+std::string Input::GetJoystickName(int index) const
+{
+    if (index >= 0 && index < static_cast<int>(mJoysticks.size()) && mJoysticks[index])
+    {
+        const char* name = SDL_JoystickName(mJoysticks[index]);
+        return name ? std::string(name) : std::string();
+    }
+    return std::string();
 }
 
 int Input::GetJoystickHat(int index, int hat) const
@@ -1001,6 +1019,25 @@ uint32 gamepadGetNumButtons(uint32 index)
         int joystickIndex = static_cast<int>(index) - gamepadCount;
         return static_cast<uint32>(input.GetJoystickButtonCount(joystickIndex));
     }
+}
+
+// Device name for a combined index (gamepads first, then raw joysticks), matching
+// the ordering gamepadGetDeviceId / gamepadGetNumAxes use.
+std::string gamepadGetName(uint32 index)
+{
+    Input& input = Input::GetInstance();
+    int gamepadCount = input.GetGamepadCount();
+    if (index < static_cast<uint32>(gamepadCount))
+        return input.GetGamepadName(static_cast<int>(index));
+    return input.GetJoystickName(static_cast<int>(index) - gamepadCount);
+}
+
+// True when the combined-index device is a raw joystick (likely an R/C
+// transmitter) rather than a mapped game controller.
+bool gamepadIsRawJoystick(uint32 index)
+{
+    Input& input = Input::GetInstance();
+    return index >= static_cast<uint32>(input.GetGamepadCount());
 }
 
 uint32 gamepadGetButtons(uint32 index)

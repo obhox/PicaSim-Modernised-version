@@ -22,6 +22,7 @@ ShaderManager::ShaderManager(LoadingScreenHelper* loadingScreen)
     mShaders[SHADER_SIMPLE]                        = new SimpleShader();
     mShaders[SHADER_CONTROLLER]                    = new ControllerShader();
     mShaders[SHADER_SKYBOX]                        = new SkyboxShader();
+    mShaders[SHADER_SKY_HOSEK]                     = new ProceduralSkyShader();
     mShaders[SHADER_OVERLAY]                       = new OverlayShader();
     mShaders[SHADER_MODEL]                         = new ModelShader();
     mShaders[SHADER_TEXTUREDMODEL]                 = new TexturedModelShader();
@@ -29,8 +30,12 @@ ShaderManager::ShaderManager(LoadingScreenHelper* loadingScreen)
     mShaders[SHADER_PLAIN]                         = new PlainShader();
     mShaders[SHADER_TERRAIN]                       = new TerrainShader();
     mShaders[SHADER_TERRAIN_PANORAMA]              = new TerrainPanoramaShader();
+    mShaders[SHADER_TERRAIN_SPLAT]                 = new TerrainSplatShader();
+    mShaders[SHADER_PLAIN_WATER]                   = new PlainWaterShader();
     mShaders[SHADER_SHADOW]                        = new ShadowShader();
     mShaders[SHADER_SMOKE]                         = new SmokeShader();
+    mShaders[SHADER_SHADOWCAST]                    = new ShadowCastShader();
+    mShaders[SHADER_TERRAIN_SHADOW_CSM]            = new TerrainShadowCsmShader();
 
     if (loadingScreen)
         loadingScreen->Update("Compiling shaders");

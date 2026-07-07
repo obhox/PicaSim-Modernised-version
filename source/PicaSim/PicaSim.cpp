@@ -12,17 +12,24 @@
 #include "Menus/HelpMenu.h"
 #include "SimpleObject.h"
 #include "WindsockOverlay.h"
+#include "WeatherVisualization.h"
 #include "ChallengeFreeFly.h"
 #include "ChallengeRace.h"
 #include "ChallengeLimbo.h"
 #include "ChallengeDuration.h"
 #include "PicaJoystick.h"
+#include "Replay/ReplayGhost.h"
 
 #include "Menus/PicaDialog.h"
+#include "Menus/UIHelpers.h"
 
 #include "../Platform/S3ECompat.h"
 #include "../Platform/Input.h"
 #include "Platform.h"
+
+#include "imgui.h"
+#include "imgui_impl_sdl2.h"
+#include "imgui_impl_opengl3.h"
 
 #ifdef PICASIM_VR_SUPPORT
 #include "../Platform/VRManager.h"
@@ -33,6 +40,8 @@
 float numButtonSlots = 8.0f;
 
 PicaSim* PicaSim::mInstance = 0;
+std::string PicaSim::mBootGhostFile;
+bool PicaSim::mForceTelemetry = false;
 
 //======================================================================================================================
 PicaSim::PicaSim(GameSettings& gameSettings)
@@ -50,11 +59,13 @@ PicaSim::PicaSim(GameSettings& gameSettings)
     mControllerOverlay = 0;
     mControllerOverlayTextOpacity = 1.0f;
     mWindsockOverlay = 0;
+    mWeatherVisualization = 0;
     mSound = 0;
     mSoundChannel = -1;
     mChallenge = 0;
     mUpdateCounter = 0;
     mTimeSinceEnabled = 0.0f;
+    mReplayGhost = 0;
 }
 
 //======================================================================================================================
@@ -201,6 +212,12 @@ bool PicaSim::Init(GameSettings& gameSettings, LoadingScreenHelper* loadingScree
         mInstance->mGameSettings.mOptions.mWindArrowSize, 0.5f,
         mInstance->mGameSettings.mOptions.mWindArrowSize, 0, 0.0f);
 
+    // Optional air-visualization overlay (wind streamlines / thermals / turbulence).
+    // Registers itself with the RenderManager; does nothing unless its Options
+    // flags are enabled.
+    mInstance->mWeatherVisualization = new WeatherVisualization();
+    mInstance->mWeatherVisualization->Init();
+
     if (loadingScreen) loadingScreen->Update("Wind sound");
     mInstance->mSound = AudioManager::GetInstance().LoadSound("SystemData/Audio/WindLoop22050Mono.raw", 22050, false, true, true);
     mInstance->mSoundChannel = AudioManager::GetInstance().AllocateSoundChannel(1.0f, true);
@@ -239,7 +256,58 @@ bool PicaSim::Init(GameSettings& gameSettings, LoadingScreenHelper* loadingScree
   {
       mInstance->mConnectionListener = 0;
   }
+
+    // Start the always-on flight recorder (bounded ring buffer, last 60s). This is
+    // cheap and side-effect-free: it only samples already-computed state at 10Hz.
+    {
+        const std::string& aeroName = gameSettings.mAeroplaneSettings.mName;
+        const std::string& envName = gameSettings.mEnvironmentSettings.mObjectsSettingsFile;
+        uint32 digest = mInstance->mPlayerAeroplane ? mInstance->mPlayerAeroplane->GetChecksum() : 0;
+        mInstance->mReplayRecorder.StartRecording(aeroName, envName, digest, 10.0f, 60.0f);
+    }
+
+    // --ghost / --replay boot hook: spawn a translucent ghost from a .psrp file so
+    // a single-run screenshot shows it. Uses the currently-loaded aeroplane model.
+    if (!mBootGhostFile.empty())
+    {
+        if (!mInstance->SpawnGhostFromFile(mBootGhostFile, loadingScreen))
+            TRACE("Failed to load boot ghost replay '%s'", mBootGhostFile.c_str());
+    }
+
+    // Register the in-flight telemetry overlay hook. The callback is a no-op
+    // (no ImGui frame at all) unless the telemetry window is actually enabled,
+    // so leaving it default-off changes nothing about the flight render path.
+    RenderManager::GetInstance().SetPreSwapCallback(&PicaSim::TelemetryPreSwapCallback);
+
     return true;
+}
+
+//======================================================================================================================
+void PicaSim::TelemetryPreSwapCallback()
+{
+    if (mInstance && mInstance->IsTelemetryEnabled())
+        mInstance->DrawTelemetryOverlay();
+}
+
+//======================================================================================================================
+void PicaSim::DrawTelemetryOverlay()
+{
+    // Draw the telemetry window in its own ImGui frame, on top of the flight
+    // scene + LDR HUD overlays that RenderManager has already rendered this
+    // frame. RenderManager::RenderUpdate() performs the buffer swap immediately
+    // after this returns, so we must NOT swap here. This runs only from the
+    // pre-swap hook during normal flight rendering; the menu/dialog ImGui usage
+    // uses RenderWithoutSwap() + its own frame and never calls RenderUpdate(),
+    // so the two paths never begin an ImGui frame at the same time.
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplSDL2_NewFrame();
+    ImGui::NewFrame();
+    UIHelpers::ApplyFontScale();
+
+    mTelemetryWindow.Draw(mPlayerAeroplane, mCurrentDeltaTime);
+
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
 //======================================================================================================================
@@ -250,6 +318,23 @@ void PicaSim::Terminate()
 
     if (mInstance)
     {
+        // Remove the telemetry pre-swap hook before we tear the instance down so
+        // a stray RenderUpdate() can't call back into a destroyed PicaSim.
+        if (RenderManager::GetExists())
+            RenderManager::GetInstance().SetPreSwapCallback(0);
+
+        // Persist the always-on recording so a "replay last flight" is available
+        // after exit, and tidy up any active ghost.
+        if (mInstance->mReplayRecorder.HasData())
+        {
+            ReplayData copy = mInstance->mReplayRecorder.GetData();
+            copy.RebaseTimeToZero();
+            std::string lastPath = ReplayRecorder::GetReplayDir() + "last-flight.psrp";
+            if (copy.Save(lastPath))
+                TRACE("Saved last-flight replay to %s (%u snapshots)", lastPath.c_str(), (unsigned)copy.GetNumSnapshots());
+        }
+        mInstance->ClearGhost();
+
         if (mInstance->mConnectionListener)
         {
             mInstance->mConnectionListener->Terminate();
@@ -307,6 +392,13 @@ void PicaSim::Terminate()
 
         delete mInstance->mWindsockOverlay;
         mInstance->mWindsockOverlay = 0;
+
+        if (mInstance->mWeatherVisualization)
+        {
+            mInstance->mWeatherVisualization->Terminate();
+            delete mInstance->mWeatherVisualization;
+            mInstance->mWeatherVisualization = 0;
+        }
 
         mInstance->mParticleEngine.Terminate();
     }
@@ -477,6 +569,40 @@ void PicaSim::RemoveAeroplane(Aeroplane* aeroplane)
     Aeroplanes::iterator it = std::find(mAeroplanes.begin(), mAeroplanes.end(), aeroplane);
     if (it != mAeroplanes.end())
         mAeroplanes.erase(it);
+}
+
+//======================================================================================================================
+std::string PicaSim::SaveCurrentReplay()
+{
+    if (!mReplayRecorder.HasData())
+        return std::string();
+    return mReplayRecorder.SaveTimestamped("flight");
+}
+
+//======================================================================================================================
+bool PicaSim::SpawnGhostFromFile(const std::string& path, LoadingScreenHelper* loadingScreen)
+{
+    ClearGhost();
+    mReplayGhost = new ReplayGhost();
+    // Draw the ghost using the currently-loaded aeroplane model.
+    if (!mReplayGhost->Load(path, mGameSettings.mAeroplaneSettings, loadingScreen, 0.45f))
+    {
+        delete mReplayGhost;
+        mReplayGhost = 0;
+        return false;
+    }
+    return true;
+}
+
+//======================================================================================================================
+void PicaSim::ClearGhost()
+{
+    if (mReplayGhost)
+    {
+        mReplayGhost->Terminate();
+        delete mReplayGhost;
+        mReplayGhost = 0;
+    }
 }
 
 //======================================================================================================================
@@ -801,6 +927,36 @@ PicaSim::UpdateResult PicaSim::Update(int64 deltaTimeMs)
 
         // Update the aeroplane settings just in case they got changed
         mPlayerAeroplane->SetAeroplaneSettings(mGameSettings.mAeroplaneSettings);
+    }
+
+    // Replay hotkeys:
+    //   F6 - save the last ~60s of flight to a timestamped .psrp under <UserData>/Replays/
+    //   F7 - load <UserData>/Replays/last-flight.psrp and spawn a translucent ghost
+    //   F8 - remove the active ghost
+    if (Input::GetInstance().GetKeyState(SDLK_F6) & KEY_STATE_PRESSED)
+    {
+        std::string saved = SaveCurrentReplay();
+        TRACE("Replay F6: %s", saved.empty() ? "nothing to save" : saved.c_str());
+    }
+    if (Input::GetInstance().GetKeyState(SDLK_F7) & KEY_STATE_PRESSED)
+    {
+        std::string path = ReplayRecorder::GetReplayDir() + "last-flight.psrp";
+        LoadingScreen loadingScreen("Loading replay", mGameSettings, true, true, true);
+        bool ok = SpawnGhostFromFile(path, &loadingScreen);
+        TRACE("Replay F7: load '%s' -> %s", path.c_str(), ok ? "ok" : "failed");
+    }
+    if (Input::GetInstance().GetKeyState(SDLK_F8) & KEY_STATE_PRESSED)
+    {
+        ClearGhost();
+        TRACE("Replay F8: ghost cleared");
+    }
+
+    // F9 - toggle the in-flight telemetry window (also settable in Settings and
+    // via the --telemetry CLI flag).
+    if (Input::GetInstance().GetKeyState(SDLK_F9) & KEY_STATE_PRESSED)
+    {
+        mGameSettings.mOptions.mShowTelemetry = !mGameSettings.mOptions.mShowTelemetry;
+        TRACE("Telemetry F9: %s", mGameSettings.mOptions.mShowTelemetry ? "on" : "off");
     }
 
     // L to reload the plane
@@ -1135,8 +1291,19 @@ PicaSim::UpdateResult PicaSim::Update(int64 deltaTimeMs)
     if (mInstance->mConnectionListener)
         mConnectionListener->Update();
 
+    // Drive the replay ghost (graphics only) before the entity update so its
+    // graphics EntityUpdate and the render pass both see the fresh pose. Plays at
+    // real time (mCurrentDeltaTime) regardless of pause.
+    if (mReplayGhost)
+        mReplayGhost->Update(mCurrentDeltaTime);
+
     // Updates everything non-graphical, including physics
     EntityManager::GetInstance().UpdateEntities(gameDeltaTime);
+
+    // Sample the player's post-physics state into the always-on recorder. No-op
+    // when paused (gameDeltaTime==0) or not recording.
+    if (mPlayerAeroplane)
+        mReplayRecorder.RecordFrame(gameDeltaTime, *mPlayerAeroplane);
 
     Challenge::ChallengeResult challengeResult = mChallenge->UpdateChallenge(gameDeltaTime);
     if (challengeResult == Challenge::CHALLENGE_RELAUNCH)

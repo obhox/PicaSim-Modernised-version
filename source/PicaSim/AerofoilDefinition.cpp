@@ -805,6 +805,17 @@ float AerofoilDefinition::ApplyForces(
 
     float pitchingMoment = -CM * configuration.mArea * dynamicPressure * configuration.mExtents.x;
 
+    // Crash damage: scale this section's aerodynamic force by its effectiveness.
+    // Guarded so that when effectiveness is exactly 1.0 (the default, and always
+    // the case when crash damage is disabled or nothing has broken off) the
+    // forces are left completely untouched -> byte-identical to before.
+    if (control.mEffectiveness != 1.0f)
+    {
+        liftForce *= control.mEffectiveness;
+        dragForce *= control.mEffectiveness;
+        pitchingMoment *= control.mEffectiveness;
+    }
+
 #if 0
     Transform windTM;
     windTM.SetAxisAngle(parameters.mTM.RowY(), angleOfAttack);

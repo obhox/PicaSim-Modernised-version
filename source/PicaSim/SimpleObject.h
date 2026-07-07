@@ -17,6 +17,7 @@ public:
     void EntityUpdate(float deltaTime, int entityLevel) OVERRIDE;
 
     void RenderUpdate(class Viewport* viewport, int renderLevel) OVERRIDE;
+    void RenderShadowCast() OVERRIDE;
 
     float GetRenderBoundingRadius() const OVERRIDE {return mRenderBoundingRadius;}
 

@@ -16,11 +16,16 @@ public:
     void Terminate();
 
     void RenderUpdate(Viewport* viewport, int renderLevel) OVERRIDE;
+    void RenderShadowCast() OVERRIDE;
     void EntityUpdate(float deltaTime, int entityLevel) OVERRIDE;
 
     const Transform& GetTM() const OVERRIDE;
 
     float GetRenderBoundingRadius() const OVERRIDE;
+
+    /// Renders the whole model translucent (alpha < 1) - used for replay "ghosts".
+    /// Applied every frame so it survives per-frame control-surface alpha tweaks.
+    void SetGhostAlpha(float alpha) {mGhostAlpha = alpha;}
 
 private:
     struct Box
@@ -58,6 +63,7 @@ private:
     };
 
     void RenderUpdateComponents(Viewport* viewport, int renderLevel);
+    void RenderUpdateDebris(Viewport* viewport, int renderLevel);
     void RenderUpdatePropDisks(Viewport* viewport, int renderLevel);
     void RenderUpdate3DS(Viewport* viewport, int renderLevel);
     void RenderDebug(Viewport* viewport, int renderLevel);
@@ -75,6 +81,8 @@ private:
     PropDisks mPropDisks;
 
     RenderModel mRenderModel;
+
+    float mGhostAlpha = 1.0f;
 
     static const int mNumPropDiskPoints = 16;
     static GLfloat mPropDiskPoints[mNumPropDiskPoints * 2];

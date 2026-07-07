@@ -264,6 +264,8 @@ inline void s3eOSExecExecute(const char* command, bool async) {
 //==============================================================================
 bool gamepadAvailable();
 uint32 gamepadGetNumDevices();
+std::string gamepadGetName(uint32 index);   // SDL device name for a combined index
+bool gamepadIsRawJoystick(uint32 index);    // true = raw joystick (likely an R/C TX)
 void gamepadCalibrate();
 void gamepadUpdate();
 uint32 gamepadGetNumAxes(uint32 index);

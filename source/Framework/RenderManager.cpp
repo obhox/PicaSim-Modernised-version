@@ -11,9 +11,14 @@
 #include "Shaders.h"
 #include "HdrRenderTarget.h"
 #include "PostProcess.h"
+#include "ShadowManager.h"
+#include "Viewport.h"
 #include "../Platform/S3ECompat.h"
 #include "../Platform/Window.h"
 #include "../Platform/Platform.h"
+
+#include <glm/glm.hpp>
+#include <cstring>
 
 #ifdef PICASIM_VR_SUPPORT
 #include "../Platform/VRManager.h"
@@ -55,10 +60,12 @@ RenderManager::RenderManager(FrameworkSettings& frameworkSettings)
     mShadowSizeScale = 1.3f;
     mEnableStereoscopy = false;
     mStereoSeparation = 0.0f;
+    mPreSwapCallback = 0;
     mHdrTarget = nullptr;
     mPostProcess = nullptr;
     mHdrWidth = 0;
     mHdrHeight = 0;
+    mShadowManager = nullptr;
 
     float lightBearing   = 0.0f;
     float lightElevation = 0.0f;
@@ -75,6 +82,8 @@ RenderManager::~RenderManager()
     }
     delete mHdrTarget;
     mHdrTarget = nullptr;
+    delete mShadowManager;
+    mShadowManager = nullptr;
     delete mDebugRenderer;
 }
 
@@ -230,6 +239,80 @@ void RenderManager::SetupLighting()
         esComputeModelPBRState(usePBR, mFrameworkSettings.mSHAmbientScale,
                                ambientColour, diffuseColour, sunAmbientFill);
     }
+
+    // Capture the current view matrix (MODELVIEW is the pure camera view here) so
+    // the CSM receiving shaders can recover each model's world matrix.
+    esCaptureViewForShadows();
+}
+
+//======================================================================================================================
+void RenderManager::ShadowCasterCallback(void* user)
+{
+    RenderManager* self = (RenderManager*)user;
+    for (size_t i = 0; i != self->mShadowCasterObjects.size(); ++i)
+        self->mShadowCasterObjects[i]->RenderShadowCast();
+}
+
+//======================================================================================================================
+void RenderManager::UpdateCSM(Viewport* primaryViewport, int screenWidth, int screenHeight)
+{
+    // Default: CSM inactive. gCsmState.mEnabled == 0 keeps every lit shader on its
+    // existing (non-CSM) path, so the blob-shadow default is untouched.
+    gCsmState.mEnabled = 0;
+
+    bool wantCsm = (mFrameworkSettings.mShadowMode == 2) &&
+                   !mFrameworkSettings.mClassicRendering &&
+                   primaryViewport && primaryViewport->GetEnabled();
+    if (!wantCsm)
+        return;
+
+    if (!mShadowManager)
+        mShadowManager = new ShadowManager();
+    if (!mShadowManager->EnsureResources())
+        return;
+
+    Camera& camera = *primaryViewport->GetCamera();
+    float aspectRatio = primaryViewport->GetAspectRatio();
+
+    // Set up the primary camera's projection + view on the matrix stack, then
+    // capture them as glm matrices (the es GLMat44 bytes are layout-identical to
+    // glm::mat4 for these transforms).
+    esMatrixMode(GL_PROJECTION);
+    esLoadIdentity();
+    camera.SetupCameraProjection(aspectRatio);
+
+    esMatrixMode(GL_MODELVIEW);
+    esLoadIdentity();
+    camera.SetupCameraView(Vector3(0, 0, 0));
+
+    GLMat44 viewM;  esGetMatrix(viewM, GL_MODELVIEW);
+    GLMat44 projM;  esGetMatrix(projM, GL_PROJECTION);
+    glm::mat4 view, proj;
+    memcpy(&view[0][0], viewM, sizeof(GLMat44));
+    memcpy(&proj[0][0], projM, sizeof(GLMat44));
+
+    // Bound the shadowed depth range - the camera far plane can be tens of km, far
+    // too large to fit useful cascades to. Tunable.
+    const float shadowMaxDist = 300.0f;
+    float camNear = mFrameworkSettings.mNearClipPlaneDistance;
+
+    mShadowManager->ComputeCascades(view, proj, mLightingDirection, camNear, shadowMaxDist);
+    mShadowManager->RenderCascades(&RenderManager::ShadowCasterCallback, this);
+
+    // Publish state for the receiving shaders.
+    gCsmState.mEnabled        = 1;
+    gCsmState.mShadowTexArray = mShadowManager->GetTextureArray();
+    gCsmState.mShadowUnit     = 4;
+    gCsmState.mNumCascades    = ShadowManager::NUM_CASCADES;
+    gCsmState.mBias           = mFrameworkSettings.mCsmBias;
+    gCsmState.mShadowStrength = mShadowStrength;
+    for (int i = 0; i < ShadowManager::NUM_CASCADES; ++i)
+        memcpy(gCsmState.mCascadeViewProj[i], &mShadowManager->GetCascadeViewProj(i)[0][0], 16 * sizeof(float));
+
+    // Bind the shadow array on its dedicated unit for the whole main pass.
+    glActiveTexture(GL_TEXTURE0 + gCsmState.mShadowUnit);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, gCsmState.mShadowTexArray);
+    glActiveTexture(GL_TEXTURE0);
 }
 
 DisplayConfig GetDisplayConfig(int screenWidth, int screenHeight, int viewpointIndex, int numViewpoints)
@@ -287,6 +370,15 @@ void RenderManager::RenderUpdate()
     // failed HDR setup) bypasses this and draws straight to the default FB, which
     // is pixel-identical to the pre-HDR behaviour.
     bool useHdr = !mFrameworkSettings.mClassicRendering && EnsureHdrResources(w, h);
+
+    // Cascaded Shadow Map pass - once per frame, before any eye/viewport, from the
+    // primary (first enabled) viewport's camera. No-op unless mShadowMode == 2.
+    {
+        Viewport* primary = nullptr;
+        for (Viewports::iterator it = mViewports.begin(); it != mViewports.end(); ++it)
+            if ((*it)->GetEnabled()) { primary = *it; break; }
+        UpdateCSM(primary, w, h);
+    }
 
     for (int iViewpoint = 0 ; iViewpoint != numViewpoints ; ++iViewpoint)
     {
@@ -423,11 +515,17 @@ void RenderManager::RenderUpdate()
         DisableDepthMask disableDepthMask;
         DisableDepthTest disableDepthTest;
         IwGxFlush();
+        // Draw any registered ImGui overlay (e.g. telemetry window) on top of the
+        // now-flushed HUD/text batch, still before the swap. No-op if unset.
+        if (mPreSwapCallback)
+            mPreSwapCallback();
         IwGxSwapBuffers();
         RecoverFromIwGx(false);
     }
     else
     {
+        if (mPreSwapCallback)
+            mPreSwapCallback();
         // Finalise rendering
         IwGLSwapBuffers();
     }
@@ -461,6 +559,14 @@ void RenderManager::RenderWithoutSwap()
     // Same HDR routing as RenderUpdate() (kept in sync so the menu-backdrop 3D
     // view matches the in-flight view). See RenderUpdate() for the rationale.
     bool useHdr = !mFrameworkSettings.mClassicRendering && EnsureHdrResources(w, h);
+
+    // CSM pass (see RenderUpdate()).
+    {
+        Viewport* primary = nullptr;
+        for (Viewports::iterator it = mViewports.begin(); it != mViewports.end(); ++it)
+            if ((*it)->GetEnabled()) { primary = *it; break; }
+        UpdateCSM(primary, w, h);
+    }
 
     for (int iViewpoint = 0 ; iViewpoint != numViewpoints ; ++iViewpoint)
     {

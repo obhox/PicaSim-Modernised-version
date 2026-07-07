@@ -11,6 +11,7 @@ enum ShaderType
     SHADER_SIMPLE,
     SHADER_CONTROLLER,
     SHADER_SKYBOX,
+    SHADER_SKY_HOSEK,           // procedural dynamic sky
     SHADER_OVERLAY,
     SHADER_MODEL,
     SHADER_TEXTUREDMODEL,
@@ -18,8 +19,12 @@ enum ShaderType
     SHADER_PLAIN,
     SHADER_TERRAIN,
     SHADER_TERRAIN_PANORAMA,
+    SHADER_TERRAIN_SPLAT,       // opt-in height/slope splatting (<TerrainLayers>)
+    SHADER_PLAIN_WATER,         // opt-in enhanced water (mEnhancedWater)
     SHADER_SHADOW,
     SHADER_SMOKE,
+    SHADER_SHADOWCAST,          // depth-only CSM caster
+    SHADER_TERRAIN_SHADOW_CSM,  // CSM terrain shadow-receiver decal
     NUM_SHADERS
 };
 

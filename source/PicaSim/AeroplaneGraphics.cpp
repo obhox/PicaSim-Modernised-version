@@ -9,6 +9,7 @@
 #include "ShaderManager.h"
 #include "Shaders.h"
 #include "ParticleEmitter.h"
+#include "GltfLoader.h"
 #include "tinyxml.h"
 
 GLfloat AeroplaneGraphics::mPropDiskPoints[mNumPropDiskPoints * 2];
@@ -424,6 +425,23 @@ void AeroplaneGraphics::Init(TiXmlDocument& aeroplaneDoc, Aeroplane* aeroplane)
                 load3DS.Import3DS(&model, modelFile.c_str());
                 mRenderModel.Init(model, offset, as.mColourOffset, Vector3(modelScale, modelScale, modelScale), cullBackFaces[iModel], unsetColour);
             }
+            else if (modelFile.find(".gltf") != std::string::npos || modelFile.find(".glb") != std::string::npos)
+            {
+                // Modern glTF path. GltfLoader parses the file with cgltf and
+                // produces the same RenderModel::Component layout as AC3D, so all
+                // downstream rendering/animation is unchanged. Selection is purely
+                // by file extension; the .ac path below stays the default.
+                bool rgb565 = gs.mOptions.m16BitTextures;
+                RenderModel::GltfModelData gltfData;
+                if (LoadGltfModel(gltfData, modelFile, offsets[iModel], modelScale, as.mColourOffset))
+                {
+                    mRenderModel.Init(gltfData, cullBackFaces[iModel], rgb565, as.mColourOffset);
+                }
+                else
+                {
+                    TRACE("Error loading glTF %s", modelFile.c_str());
+                }
+            }
             else if (modelFile.find(".ac") != std::string::npos)
             {
                 ACModel model;
@@ -432,7 +450,7 @@ void AeroplaneGraphics::Init(TiXmlDocument& aeroplaneDoc, Aeroplane* aeroplane)
                     bool rgb565 = gs.mOptions.m16BitTextures;
 
                     mRenderModel.Init(
-                        model, modelFile, offsets[iModel], 
+                        model, modelFile, offsets[iModel],
                         as.mColourOffset, Vector3(modelScale, modelScale, modelScale), cullBackFaces[iModel], rgb565, &namedComponents);
                 }
                 else
@@ -752,6 +770,24 @@ void AeroplaneGraphics::RenderUpdate(Viewport* viewport, int renderLevel)
     }
 
 
+    // Crash damage: hide any broken-off panel on the model (it is drawn as tumbling
+    // debris instead). Uses the same per-component alpha path as control surfaces.
+    if (mAeroplane->GetPhysics())
+    {
+        const DamageManager& damage = mAeroplane->GetPhysics()->GetDamageManager();
+        const DamageManager::DebrisList& debris = damage.GetDebris();
+        for (size_t i = 0 ; i != debris.size() ; ++i)
+        {
+            if (!debris[i].mComponentName.empty())
+                mRenderModel.SetAlphaScale(debris[i].mComponentName, 0.0f);
+        }
+    }
+
+    // For a translucent replay ghost, force the whole model's alpha every frame
+    // (after any control-surface alpha tweaks above) so it renders see-through.
+    if (mGhostAlpha < 1.0f)
+        mRenderModel.SetGlobalAlphaScale(mGhostAlpha);
+
     if (mRenderModel.IsCreated())
     {
         if (options.mRenderPreference != Options::RENDER_PREFER_COMPONENTS)
@@ -765,6 +801,9 @@ void AeroplaneGraphics::RenderUpdate(Viewport* viewport, int renderLevel)
     }
 
     RenderUpdatePropDisks(viewport, renderLevel);
+
+    // Crash damage: draw any broken-off panels as tumbling debris boxes.
+    RenderUpdateDebris(viewport, renderLevel);
 }
 
 //======================================================================================================================
@@ -781,6 +820,8 @@ void AeroplaneGraphics::RenderUpdateComponents(Viewport* viewport, int renderLev
         modelShader->Use();
         glUniform1f(modelShader->u_specularExponent, specularExponent);
         glUniform1f(modelShader->u_specularAmount, specularAmount);
+        // These box faces do not receive CSM - keep the shader's shadow term off.
+        if (modelShader->u_csmEnabled >= 0) glUniform1f(modelShader->u_csmEnabled, 0.0f);
 
         glDisableVertexAttribArray(modelShader->a_normal);
 
@@ -797,10 +838,15 @@ void AeroplaneGraphics::RenderUpdateComponents(Viewport* viewport, int renderLev
         glVertexAttribPointer(modelShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
     }
 
+    const DamageManager* damage = mAeroplane->GetPhysics() ? &mAeroplane->GetPhysics()->GetDamageManager() : 0;
+
     Transform aeroplaneTM = mAeroplane->GetTransform();
     for (Boxes::iterator it = mBoxes.begin() ; it != mBoxes.end() ; ++it)
     {
         const Box& box = *it;
+        // Crash damage: a broken-off box panel is drawn as debris instead.
+        if (damage && damage->IsComponentBroken(box.mName))
+            continue;
         Transform tm = box.mTM * aeroplaneTM;
 
         esPushMatrix();
@@ -880,6 +926,111 @@ void AeroplaneGraphics::RenderUpdateComponents(Viewport* viewport, int renderLev
 }
 
 //======================================================================================================================
+void AeroplaneGraphics::RenderUpdateDebris(Viewport* viewport, int renderLevel)
+{
+    TRACE_METHOD_ONLY(2);
+    if (!mAeroplane->GetPhysics())
+        return;
+    const DamageManager& damage = mAeroplane->GetPhysics()->GetDamageManager();
+    const DamageManager::DebrisList& debris = damage.GetDebris();
+    if (debris.empty())
+        return;
+
+    EnableCullFace enableCullFace(GL_BACK);
+    const ModelShader* modelShader = (ModelShader*) ShaderManager::GetInstance().GetShader(SHADER_MODEL);
+
+    {
+        modelShader->Use();
+        glUniform1f(modelShader->u_specularExponent, 100.0f);
+        glUniform1f(modelShader->u_specularAmount, 0.5f);
+        if (modelShader->u_csmEnabled >= 0) glUniform1f(modelShader->u_csmEnabled, 0.0f);
+        glDisableVertexAttribArray(modelShader->a_normal);
+        glEnableVertexAttribArray(modelShader->a_position);
+        glDisableVertexAttribArray(modelShader->a_colour);
+        esSetLighting(modelShader->lightShaderInfo);
+    }
+
+    {
+        gStreamVBO.Bind();
+        size_t posOffset = gStreamVBO.Upload(boxPoints, sizeof(boxPoints));
+        glVertexAttribPointer(modelShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
+    }
+
+    for (DamageManager::DebrisList::const_iterator it = debris.begin() ; it != debris.end() ; ++it)
+    {
+        const DamageManager::Debris& d = *it;
+
+        // Reuse the original panel's colours where the graphical box still exists;
+        // otherwise fall back to a neutral grey.
+        Vector3 colourTop(0.5f, 0.5f, 0.5f), colourSides(0.5f, 0.5f, 0.5f);
+        Vector3 colourFront(0.5f, 0.5f, 0.5f), colourBottom(0.5f, 0.5f, 0.5f);
+        if (!d.mComponentName.empty())
+        {
+            for (Boxes::const_iterator ib = mBoxes.begin() ; ib != mBoxes.end() ; ++ib)
+            {
+                if (ib->mName == d.mComponentName)
+                {
+                    colourTop = ib->mColourTop; colourSides = ib->mColourSides;
+                    colourFront = ib->mColourFront; colourBottom = ib->mColourBottom;
+                    break;
+                }
+            }
+        }
+
+        // Debris transform is already in world space (driven by its rigid body).
+        esPushMatrix();
+        GLMat44 glTM;
+        ConvertTransformToGLMat44(d.mWorldTM, glTM);
+        esMultMatrixf(&glTM[0][0]);
+        esScalef(d.mExtents.x, d.mExtents.y, d.mExtents.z);
+
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/d.mExtents.z);
+
+        float c = ClampToRange(1.0f - mShadowAmount, 0.0f, 1.0f);
+        bool shadow = (renderLevel == RENDER_LEVEL_TERRAIN_SHADOW);
+        Vector3 cTop    = shadow ? Vector3(c, c, c) : colourTop;
+        Vector3 cSides  = shadow ? Vector3(c, c, c) : colourSides;
+        Vector3 cFront  = shadow ? Vector3(c, c, c) : colourFront;
+        Vector3 cBottom = shadow ? Vector3(c, c, c) : colourBottom;
+
+        glVertexAttrib4f(modelShader->a_colour, cTop.x, cTop.y, cTop.z, 1.0f);
+        esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+        glVertexAttrib4f(modelShader->a_colour, cFront.x, cFront.y, cFront.z, 1.0f);
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/d.mExtents.y);
+        ROTATE_90_Y;
+        esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+        glVertexAttrib4f(modelShader->a_colour, cSides.x, cSides.y, cSides.z, 1.0f);
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/d.mExtents.x);
+        ROTATE_90_X;
+        esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/d.mExtents.y);
+        ROTATE_90_X;
+        esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/d.mExtents.x);
+        ROTATE_90_X;
+        esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+        glVertexAttrib4f(modelShader->a_colour, cBottom.x, cBottom.y, cBottom.z, 1.0f);
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/d.mExtents.z);
+        ROTATE_90_Y;
+        esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+        esPopMatrix();
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+//======================================================================================================================
 void AeroplaneGraphics::RenderUpdatePropDisks(Viewport* viewport, int renderLevel)
 {
     TRACE_METHOD_ONLY(2);
@@ -899,6 +1050,7 @@ void AeroplaneGraphics::RenderUpdatePropDisks(Viewport* viewport, int renderLeve
 
         glUniform1f(modelShader->u_specularAmount, specularAmount);
         glUniform1f(modelShader->u_specularExponent, specularExponent);
+        if (modelShader->u_csmEnabled >= 0) glUniform1f(modelShader->u_csmEnabled, 0.0f);
 
         glDisableVertexAttribArray(modelShader->a_normal);
 
@@ -993,6 +1145,69 @@ void AeroplaneGraphics::RenderUpdate3DS(Viewport* viewport, int renderLevel)
         mRenderModel.Render(0, false, options.mSeparateSpecular);
     }
     esPopMatrix();
+}
+
+//======================================================================================================================
+void AeroplaneGraphics::RenderShadowCast()
+{
+    // Depth-only caster pass for CSM. The shadowcast program is already bound and
+    // the cascade world->light-clip matrix is on the matrix stack (set by
+    // ShadowManager). We just push the aircraft's world transform(s) and draw
+    // positions. Only dynamic model geometry casts (terrain never does).
+    const ShadowCastShader* shader =
+        (const ShadowCastShader*) ShaderManager::GetInstance().GetShader(SHADER_SHADOWCAST);
+
+    Transform aeroplaneTM = mAeroplane->GetTransform();
+
+    if (mRenderModel.IsCreated())
+    {
+        // 3DS/AC3D model - same orientation fix-up as RenderUpdate3DS.
+        esPushMatrix();
+        GLMat44 glTM;
+        ConvertTransformToGLMat44(aeroplaneTM, glTM);
+        esMultMatrixf(&glTM[0][0]);
+        ROTATE_90_X;
+        ROTATE_270_Y;
+        mRenderModel.RenderDepthOnly(shader);
+        esPopMatrix();
+    }
+    else
+    {
+        // Box-based aircraft: cast the six faces of each body box.
+        gStreamVBO.Bind();
+        size_t posOffset = gStreamVBO.Upload(boxPoints, sizeof(boxPoints));
+        glVertexAttribPointer(shader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
+        glEnableVertexAttribArray(shader->a_position);
+
+        const DamageManager* damage = mAeroplane->GetPhysics() ? &mAeroplane->GetPhysics()->GetDamageManager() : 0;
+
+        for (Boxes::iterator it = mBoxes.begin(); it != mBoxes.end(); ++it)
+        {
+            const Box& box = *it;
+            if (damage && damage->IsComponentBroken(box.mName))
+                continue;
+            Transform tm = box.mTM * aeroplaneTM;
+
+            esPushMatrix();
+            GLMat44 glTM;
+            ConvertTransformToGLMat44(tm, glTM);
+            esMultMatrixf(&glTM[0][0]);
+            esScalef(box.mExtents.x, box.mExtents.y, box.mExtents.z);
+
+            // Six faces (same rotation sequence as RenderUpdateComponents).
+            esSetModelViewProjectionMatrix(shader->u_mvpMatrix);
+            glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+            ROTATE_90_Y; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+            ROTATE_90_X; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+            ROTATE_90_X; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+            ROTATE_90_X; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+            ROTATE_90_Y; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+            esPopMatrix();
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glDisableVertexAttribArray(shader->a_position);
+    }
 }
 
 //======================================================================================================================

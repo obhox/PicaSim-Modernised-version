@@ -289,6 +289,13 @@ struct Options : public Settings
     float mMaxNearClipDistance;
     bool  mSeparateSpecular;
 
+    // Additive launch tunables. Defaults reproduce previous behaviour exactly
+    // (speed x1, angle +0 deg, bungee tension x1), so old settings.xml load
+    // unchanged and current flights are identical when left at their defaults.
+    float mLaunchSpeedScale;     // multiplies each aircraft's mLaunchSpeed
+    float mLaunchAngleUpDelta;   // degrees added to each aircraft's mLaunchAngleUp
+    float mBungeeTensionScale;   // multiplies bungee launch acceleration
+
     bool mFreeFlightDisplayTime;
     bool mFreeFlightDisplaySpeed;
     bool mFreeFlightDisplayAirSpeed;
@@ -304,6 +311,10 @@ struct Options : public Settings
     int   mFreeFlightMaxAI;
 
     bool mDisplayFPS;
+
+    // Additive: show the in-flight ImGui telemetry window. Default false, so old
+    // settings.xml load unchanged and nothing is drawn unless explicitly enabled.
+    bool mShowTelemetry;
 
     float mRaceVibrationAmount;
     float mRaceBeepVolume;
@@ -342,6 +353,11 @@ struct Options : public Settings
     float mControllerTrimSize;
 
     int mJoystickID;
+
+    // Auto-detect a connected game controller / R/C transmitter and load a
+    // matching joystick preset by device name (see AutoConfigureController).
+    bool mAutoConfigureJoystick;               // master switch (default on)
+    std::string mAutoConfiguredJoystickDevice; // device name we last auto-configured
 
     float mGroundViewTerrainLOD;
     float mAeroplaneViewTerrainLOD;
@@ -405,6 +421,13 @@ struct Options : public Settings
 
     bool mEnableSmoke;
     float mSmokeQuality;
+
+    // Optional air-visualization overlays (training/debug aids). All default OFF,
+    // so with these false nothing extra is rendered and there is zero cost. They
+    // only query the wind/thermal field for display - they never modify physics.
+    bool mShowWindStreamlines; ///< Draw speed-coloured wind streamlines around the plane
+    bool mShowThermals;        ///< Draw translucent columns + rising markers for active thermals
+    bool mShowTurbulence;      ///< Draw jittering puffs in rough / turbulent air
 };
 
 //======================================================================================================================
@@ -459,6 +482,22 @@ struct TerrainSettings : public Settings
     static const char* mTerrainTypes[NUM_TYPES];
 
     Type  mType;
+
+    // Opt-in terrain splatting. When mTerrainLayers is non-empty (a
+    // <TerrainLayers> block was present) the non-panorama terrain is drawn with
+    // the height/slope splat shader; otherwise the legacy dual-texture path runs
+    // unchanged. Up to 4 layers are used.
+    struct TerrainLayer
+    {
+        TerrainLayer()
+            : mHeightMin(-100000.0f), mHeightMax(100000.0f),
+              mSlopeMin(0.0f), mSlopeMax(90.0f), mScale(20.0f) {}
+        std::string mTexture;
+        float mHeightMin, mHeightMax;   // world-Z window
+        float mSlopeMin,  mSlopeMax;    // slope window, degrees
+        float mScale;                   // world units per texture tile
+    };
+    std::vector<TerrainLayer> mTerrainLayers;
 
     // Generic settings
 
@@ -657,6 +696,19 @@ struct EnvironmentSettings : public Settings
     float      mRunwayAngle;
     float      mRunwayLength;
     float      mRunwayWidth;
+
+    // Optional procedural "dynamic sky". When mDynamicSkyEnabled is true (set by
+    // the presence of a <DynamicSky .../> element in the environment XML) the
+    // photo skybox/panorama path is replaced by a procedural Hosek-Wilkie-style
+    // atmosphere with a movable sun / time-of-day. When false, everything behaves
+    // exactly as before (this is a purely additive feature).
+    bool  mDynamicSkyEnabled;
+    float mDynamicSkyTimeOfDay;    // hours 0..24
+    float mDynamicSkyTimeScale;    // hours advanced per real second (0 = frozen)
+    float mDynamicSkyLatitude;     // degrees
+    float mDynamicSkyTurbidity;    // 1 clear .. ~10 hazy
+    float mDynamicSkyCloudCover;   // 0..1
+    float mDynamicSkyGroundAlbedo; // 0..1
 };
 
 //======================================================================================================================

@@ -54,6 +54,11 @@ struct AerofoilControl
     float mExtraCamber;
     float mExtraAngle;
     float mCDScale;
+    // Per-wing-section aerodynamic effectiveness (crash damage). 1.0 = intact
+    // (default), 0.0 = broken-off panel producing no lift/drag. When this is
+    // exactly 1.0 the aero code takes a guarded no-op path, so with crash
+    // damage disabled the forces are byte-identical to before this feature.
+    float mEffectiveness = 1.0f;
 };
 
 #endif

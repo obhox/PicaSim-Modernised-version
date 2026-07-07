@@ -328,6 +328,7 @@ void Runway::RenderUpdate(class Viewport* viewport, int renderLevel)
         glUniform1f(texturedModelShader->u_texBias, -0.5f);
         glUniform1f(texturedModelShader->u_specularExponent, specularExponent);
         glUniform1f(texturedModelShader->u_specularAmount, specularAmount);
+        if (texturedModelShader->u_csmEnabled >= 0) glUniform1f(texturedModelShader->u_csmEnabled, 0.0f);
 
         glEnableVertexAttribArray(texturedModelShader->a_position);
         glEnableVertexAttribArray(texturedModelShader->a_texCoord);

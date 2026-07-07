@@ -6,11 +6,14 @@
 #include <string>
 #include <vector>
 
+class ShadowCastShader;
+
 struct ShaderProgramModelInfo
 {
     int colourLoc;
     int mvpLoc;
     int normalMatrixLoc;
+    int worldMatrixLoc;   // -1 unless CSM receiving is active this draw
 };
 
 typedef std::vector<std::string> NamedComponents;
@@ -57,6 +60,10 @@ public:
     /// Allow modification of the component alpha to blend it out
     void SetAlphaScale(const std::string& componentName, float alphaScale);
 
+    /// Sets the alpha scale on every component (e.g. to render a translucent
+    /// replay "ghost"). Reuses the same per-component blending path as SetAlphaScale.
+    void SetGlobalAlphaScale(float alphaScale);
+
     // clears any loaded model
     void Terminate();
     /// if colour is non-zero then it is used for the colour. If forceColour is true then all texture/lighting etc is disabled
@@ -72,6 +79,11 @@ public:
         bool                    separateSpecular) const;
     void PartRender(const Vector4* colour, bool forceColour, ShaderProgramModelInfo& shaderInfo, int componentIndex) const;
     void PartRenderPost(const Vector4* colour, bool forceColour, int componentIndex) const;
+
+    /// Depth-only draw for the CSM caster pass. Assumes the shadowcast program is
+    /// bound and the engine matrix stack holds the cascade world->light-clip
+    /// matrix. Draws each component's positions (component TMs applied).
+    void RenderDepthOnly(const ShadowCastShader* shader) const;
 
     void CreateVertexBuffers();
 
@@ -92,6 +104,27 @@ public:
         GLfloat mTexCoord[2];
     };
     typedef std::vector<TexturedVertex> TexturedVertices;
+
+    // Neutral intermediate produced by the glTF loader (GltfLoader.cpp). It is
+    // deliberately free of any cgltf dependency so RenderModel does not need to
+    // know about the glTF library. Each entry becomes one RenderModel::Component.
+    // Vertices are already in final PicaSim model space (axis-converted, node
+    // transforms baked, scaled and offset). mTexturePath, when non-empty, is a
+    // ready-to-load image path (loaded via the same Texture path as AC3D).
+    struct GltfComponentData
+    {
+        GltfComponentData() : mRoughness(0.6f), mMetallic(0.0f) {}
+        std::string        mName;
+        std::string        mTexturePath;   // "" => untextured (uses vertex colour)
+        UntexturedVertices mUntexturedVertices;
+        TexturedVertices   mTexturedVertices;
+        float              mRoughness;
+        float              mMetallic;
+    };
+    typedef std::vector<GltfComponentData> GltfModelData;
+
+    /// Initialise from a glTF intermediate (see GltfLoader.cpp)
+    void Init(const GltfModelData& data, bool cullBackFaces, bool rgb565, float colourOffset);
 
     struct Component
     {

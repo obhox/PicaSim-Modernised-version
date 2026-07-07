@@ -19,6 +19,12 @@ struct FrameworkSettings
     bool isMobile() const { return Platform::IsMobile(); }
 
     int mPhysicsSubsteps;
+
+    // Opt-in crash damage (break-off components). Default false -> the contact
+    // hook does nothing and all wing effectiveness stays 1.0, so flight physics
+    // and scoring are byte-identical to before this feature existed.
+    bool mCrashDamage;
+
     float mNearClipPlaneDistance;
     float mFarClipPlaneDistance;
     bool  mUseMultiLights;
@@ -42,6 +48,19 @@ struct FrameworkSettings
     // brightness (1.0 ~= the old flat fill).
     bool  mUsePBR;
     float mSHAmbientScale;
+
+    // Shadow mode: 0 = Off, 1 = Blob (legacy default - preserves current look),
+    // 2 = Cascaded Shadow Maps (opt-in). Forced to blob/off when mClassicRendering
+    // is set. mCsmBias is the depth-compare bias for the CSM path (acne knob).
+    int   mShadowMode;
+    float mCsmBias;
+
+    // Enhanced water (Phase 5). Opt-in, default OFF so existing lake/plain scenes
+    // render bit-for-bit unchanged (they keep using plain.frag). When true the
+    // inner water disc is drawn with plain_water.frag: scrolling ripple normal,
+    // fresnel sky tint and a subtle sun glint. Ignored for photo panoramas (whose
+    // plain is depth-only) and for the outer fog ring.
+    bool  mEnhancedWater;
 
     Platform::PlatformID mPlatform;
     mutable int mScreenWidth, mScreenHeight;

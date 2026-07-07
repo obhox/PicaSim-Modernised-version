@@ -105,6 +105,7 @@ void BoxObject::RenderUpdate(class Viewport* viewport, int renderLevel)
     {
         modelShader->Use();
         glUniform1f(modelShader->u_specularExponent, 100.0f);
+        if (modelShader->u_csmEnabled >= 0) glUniform1f(modelShader->u_csmEnabled, 0.0f);
 
         glDisableVertexAttribArray(modelShader->a_normal);
 
@@ -202,6 +203,41 @@ void BoxObject::RenderUpdate(class Viewport* viewport, int renderLevel)
     {
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     }
+}
+
+//======================================================================================================================
+void BoxObject::RenderShadowCast()
+{
+    if (!mVisible || !mShadowVisible)
+        return;
+
+    const ShadowCastShader* shader =
+        (const ShadowCastShader*) ShaderManager::GetInstance().GetShader(SHADER_SHADOWCAST);
+
+    gStreamVBO.Bind();
+    size_t posOffset = gStreamVBO.Upload(boxPoints, sizeof(boxPoints));
+    glVertexAttribPointer(shader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
+    glEnableVertexAttribArray(shader->a_position);
+
+    esPushMatrix();
+    GLMat44 glTM;
+    ConvertTransformToGLMat44(mTM, glTM);
+    esMultMatrixf(&glTM[0][0]);
+    esScalef(mExtents.x, mExtents.y, mExtents.z);
+
+    // Six faces (same rotation sequence as RenderUpdate).
+    esSetModelViewProjectionMatrix(shader->u_mvpMatrix);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    ROTATE_90_X; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    ROTATE_90_Y; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    ROTATE_90_Y; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    ROTATE_90_Y; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    ROTATE_90_X; esSetModelViewProjectionMatrix(shader->u_mvpMatrix); glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+    esPopMatrix();
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glDisableVertexAttribArray(shader->a_position);
 }
 
 //======================================================================================================================

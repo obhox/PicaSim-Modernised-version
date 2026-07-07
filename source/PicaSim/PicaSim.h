@@ -6,6 +6,8 @@
 #include "HumanController.h"
 #include "Observer.h"
 #include "GameSettings.h"
+#include "Replay/ReplayRecorder.h"
+#include "Menus/TelemetryWindow.h"
 
 #include "Framework.h"
 
@@ -113,10 +115,46 @@ public:
     class Challenge* GetChallenge() {return mChallenge;}
     const class Challenge* GetChallenge() const {return mChallenge;}
 
+    // ---- Replay / ghost ----
+
+    /// Saves the always-on in-memory recording (last ~60s) to a timestamped
+    /// .psrp file under <UserData>/Replays/. Returns the path (empty on failure).
+    std::string SaveCurrentReplay();
+
+    /// Loads a .psrp file and spawns a translucent ghost that plays back alongside
+    /// the live flight. Returns false on failure.
+    bool SpawnGhostFromFile(const std::string& path, LoadingScreenHelper* loadingScreen = 0);
+
+    /// Removes any active ghost.
+    void ClearGhost();
+
+    bool HasGhost() const { return mReplayGhost != 0; }
+
+    /// Set before PicaSim::Init() (e.g. from the --ghost CLI hook) to auto-spawn a
+    /// ghost from the given file when the scene loads.
+    static void SetBootGhostFile(const std::string& path) { mBootGhostFile = path; }
+
+    // ---- Telemetry overlay ----
+
+    /// Forces the in-flight telemetry window on regardless of the saved setting
+    /// (used by the --telemetry CLI capture hook). Call before/after Init().
+    static void SetForceTelemetry(bool force) { mForceTelemetry = force; }
+
+    /// True if the telemetry window should be drawn (saved option OR CLI force).
+    bool IsTelemetryEnabled() const { return mGameSettings.mOptions.mShowTelemetry || mForceTelemetry; }
+
+    /// Draws the telemetry ImGui overlay for the player aeroplane. Begins and
+    /// ends its own ImGui frame; call only from the RenderManager pre-swap hook
+    /// (i.e. after the flight scene + LDR overlays, before the buffer swap).
+    void DrawTelemetryOverlay();
+
 private:
     typedef std::vector<class BoxObject*> BoxObjects;
 
     PicaSim(GameSettings& gameSettings);
+
+    /// Trampoline registered with RenderManager::SetPreSwapCallback().
+    static void TelemetryPreSwapCallback();
 
     void HandleMode();
     void UpdateJoystickToggles(bool& joystickRelaunch, bool& joystickChangeView, bool& joystickPausePlay);
@@ -158,6 +196,8 @@ private:
 
     class WindsockOverlay* mWindsockOverlay;
 
+    class WeatherVisualization* mWeatherVisualization;
+
     bool mShouldExit;
     Mode mMode;
     Status mStatus;
@@ -176,6 +216,15 @@ private:
     AudioManager::SoundChannel mSoundChannel;
 
     class ConnectionListener* mConnectionListener;
+
+    // Replay: always-on ring-buffer recorder + optional playback ghost.
+    ReplayRecorder mReplayRecorder;
+    class ReplayGhost* mReplayGhost;
+    static std::string mBootGhostFile;
+
+    // In-flight telemetry overlay (default off).
+    TelemetryWindow mTelemetryWindow;
+    static bool mForceTelemetry;
 
     // For when using the joystick
     bool mPrevJoystickRelaunch;

@@ -82,6 +82,25 @@ Vector3 ThermalManager::GetNearestThermalPosition(const Vector3& pos, float& bes
 
 
 //======================================================================================================================
+void ThermalManager::GetThermalVisInfo(std::vector<ThermalVisInfo>& out) const
+{
+    out.clear();
+    out.reserve(mThermals.size());
+    for (Thermals::const_iterator it = mThermals.begin() ; it != mThermals.end() ; ++it)
+    {
+        const Thermal& t = *it;
+        ThermalVisInfo info;
+        info.mPos          = t.mPos;
+        info.mCoreRadius   = t.GetRadius1();
+        info.mOuterRadius  = t.GetRadius3();
+        info.mDepth        = t.GetDepth();
+        info.mUpdraftSpeed = t.GetCoreUpdraftSpeed();
+        info.mActivity     = t.mActivity;
+        out.push_back(info);
+    }
+}
+
+//======================================================================================================================
 float ThermalManager::GetHorizontalDistanceSquaredToNearestThermal(const Vector3& pos) const
 {
     const GameSettings& gs = PicaSim::GetInstance().GetSettings();

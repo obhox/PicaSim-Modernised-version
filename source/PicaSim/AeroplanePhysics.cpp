@@ -466,6 +466,17 @@ void AeroplanePhysics::Init(TiXmlDocument& aeroplaneDoc, Aeroplane* aeroplane, u
         mWheels.push_back(wheel);
     }
 
+    // Crash damage: read the optional per-aircraft impact threshold. Absent
+    // element/attribute keeps the default, which scales with the aircraft mass so
+    // a heavier plane needs a proportionally harder hit to shed a panel.
+    {
+        float impactThreshold = mMass * 4.0f;
+        TiXmlElement* damageElement = docHandle.FirstChild("Physics").FirstChild("Damage").ToElement();
+        if (damageElement)
+            readFromXML(damageElement, "impactThreshold", impactThreshold);
+        mDamageManager.Init(mAeroplane, &mWings, mRigidBody, impactThreshold);
+    }
+
     // Update our wings etc
     UpdateComponentsPostPhysics(0.0f, false);
 }
@@ -474,6 +485,9 @@ void AeroplanePhysics::Init(TiXmlDocument& aeroplaneDoc, Aeroplane* aeroplane, u
 void AeroplanePhysics::Terminate()
 {
     TRACE_METHOD_ONLY(1);
+
+    // Remove any crash debris from the world before we tear the plane down.
+    mDamageManager.Terminate();
 
     if (mRopeSoftBody)
     {
@@ -585,6 +599,10 @@ void AeroplanePhysics::Launched()
     }
     mTwist = mLastTwist = 0.0f;
     mContactTime = 0.0f;
+
+    // A relaunch is a fresh, undamaged aircraft: restore all panels + effectiveness
+    // and clear any debris.
+    mDamageManager.Reset();
 }
 
 //======================================================================================================================
@@ -781,6 +799,12 @@ void AeroplanePhysics::EntityUpdate(float deltaTime, int entityLevel)
 
         // Update our wings etc
         UpdateComponentsPostPhysics(deltaTime, true);
+
+        // Crash damage: look for a hard impact this step and break off the nearest
+        // panel if found, then keep any debris transforms in sync. Both are no-ops
+        // when crash damage is disabled.
+        mDamageManager.ProcessImpacts(deltaTime, mTM, mCoMTM.GetTrans(), mCoMVel, mCoMAngVel);
+        mDamageManager.UpdateDebris(deltaTime);
     }
     else if (entityLevel == ENTITY_LEVEL_POST_PHYSICS)
     {

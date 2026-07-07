@@ -252,6 +252,7 @@ Options::Options() :
     mFreeFlightUnits(UNITS_MPS),
     mFreeFlightMaxAI(5),
     mDisplayFPS(false),
+    mShowTelemetry(false),
     mRaceVibrationAmount(0.5f),
     mLimboDifficultyMultiplier(1.0f),
     mRaceBeepVolume(0.1f),
@@ -265,6 +266,7 @@ Options::Options() :
     mControllerHorOffset(0.25f),
     mControllerVerOffset(0.5f),
     mJoystickID(0),
+    mAutoConfigureJoystick(true),
     mControllerStaggered(false),
     mControllerStyle(CONTROLLER_STYLE_CROSS),
     mControllerAlpha(255),
@@ -306,6 +308,9 @@ Options::Options() :
     mAerofoilPlotReference(true),
     mAerofoilPlotPolar(false),
     mRenderPreference(RENDER_PREFER_3DS),
+    mLaunchSpeedScale(1.0f),
+    mLaunchAngleUpDelta(0.0f),
+    mBungeeTensionScale(1.0f),
     mAmbientLightingScale(1.0f),
     mDiffuseLightingScale(1.0f),
     mBasicTextureDetail(9),
@@ -313,7 +318,10 @@ Options::Options() :
     mMSAASamples(0),
     mGLVersion(2),
     mEnableSmoke(true),
-    mSmokeQuality(1.0f)
+    mSmokeQuality(1.0f),
+    mShowWindStreamlines(false),
+    mShowThermals(false),
+    mShowTurbulence(false)
 {
     int32 memoryMB = Platform::GetSystemRAM();
     TRACE_FILE_IF(1) TRACE("Options: reported memory = %d MB", memoryMB);
@@ -348,6 +356,12 @@ bool Options::WriteToDoc(TiXmlDocument& doc) const
     WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mExposure);
     WRITE_ATTRIBUTE(mFrameworkSettings.mFXAAEnabled);
     WRITE_ATTRIBUTE(mFrameworkSettings.mPBRTonemap);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mShadowMode);
+    WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mCsmBias);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mCrashDamage);
+    WRITE_DOUBLE_ATTRIBUTE(mLaunchSpeedScale);
+    WRITE_DOUBLE_ATTRIBUTE(mLaunchAngleUpDelta);
+    WRITE_DOUBLE_ATTRIBUTE(mBungeeTensionScale);
     WRITE_DOUBLE_ATTRIBUTE(mMaxNearClipDistance);
     WRITE_ATTRIBUTE(mSeparateSpecular);
     WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mFarClipPlaneDistance); 
@@ -395,6 +409,7 @@ bool Options::WriteToDoc(TiXmlDocument& doc) const
     WRITE_ATTRIBUTE(mFreeFlightUnits);
     WRITE_ATTRIBUTE(mFreeFlightMaxAI);
     WRITE_ATTRIBUTE(mDisplayFPS);
+    WRITE_ATTRIBUTE(mShowTelemetry);
     WRITE_DOUBLE_ATTRIBUTE(mRaceVibrationAmount);
     WRITE_DOUBLE_ATTRIBUTE(mLimboDifficultyMultiplier);
     WRITE_DOUBLE_ATTRIBUTE(mRaceBeepVolume);
@@ -409,6 +424,8 @@ bool Options::WriteToDoc(TiXmlDocument& doc) const
     WRITE_DOUBLE_ATTRIBUTE(mControllerHorOffset);
     WRITE_DOUBLE_ATTRIBUTE(mControllerVerOffset);
     WRITE_ATTRIBUTE(mJoystickID);
+    WRITE_ATTRIBUTE(mAutoConfigureJoystick);
+    element->SetAttribute("mAutoConfiguredJoystickDevice", mAutoConfiguredJoystickDevice.c_str());
     WRITE_ATTRIBUTE(mControllerStaggered);
     WRITE_ATTRIBUTE(mControllerStyle);
     WRITE_ATTRIBUTE(mControllerAlpha);
@@ -471,6 +488,9 @@ bool Options::WriteToDoc(TiXmlDocument& doc) const
     WRITE_ATTRIBUTE(mGLVersion);
     WRITE_ATTRIBUTE(mEnableSmoke);
     WRITE_DOUBLE_ATTRIBUTE(mSmokeQuality);
+    WRITE_ATTRIBUTE(mShowWindStreamlines);
+    WRITE_ATTRIBUTE(mShowThermals);
+    WRITE_ATTRIBUTE(mShowTurbulence);
     return true;
 }
 
@@ -508,6 +528,17 @@ bool Options::ReadFromDoc(TiXmlDocument& doc, bool readAll)
     READ_ATTRIBUTE(mFrameworkSettings.mExposure);
     READ_ATTRIBUTE(mFrameworkSettings.mFXAAEnabled);
     READ_ATTRIBUTE(mFrameworkSettings.mPBRTonemap);
+    // Additive shadow settings - absent in older settings.xml, so the constructor
+    // default (mShadowMode = 1 = Blob) is kept and the current look is unchanged.
+    READ_ATTRIBUTE(mFrameworkSettings.mShadowMode);
+    READ_ATTRIBUTE(mFrameworkSettings.mCsmBias);
+    // Additive crash-damage + launch tunables - absent in older settings.xml, in
+    // which case the constructor defaults (crash damage off, launch scales that
+    // reproduce the previous behaviour) are kept, so old configs load unchanged.
+    READ_ATTRIBUTE(mFrameworkSettings.mCrashDamage);
+    READ_ATTRIBUTE(mLaunchSpeedScale);
+    READ_ATTRIBUTE(mLaunchAngleUpDelta);
+    READ_ATTRIBUTE(mBungeeTensionScale);
     READ_ATTRIBUTE(mMaxNearClipDistance);
     READ_ATTRIBUTE(mSeparateSpecular);
     READ_ATTRIBUTE(mFrameworkSettings.mFarClipPlaneDistance);
@@ -546,6 +577,7 @@ bool Options::ReadFromDoc(TiXmlDocument& doc, bool readAll)
     READ_ENUM_ATTRIBUTE(mFreeFlightUnits);
     READ_ATTRIBUTE(mFreeFlightMaxAI);
     READ_ATTRIBUTE(mDisplayFPS);
+    READ_ATTRIBUTE(mShowTelemetry);
     READ_ATTRIBUTE(mRaceVibrationAmount);
     READ_ATTRIBUTE(mLimboDifficultyMultiplier);
     READ_ATTRIBUTE(mRaceBeepVolume);
@@ -560,6 +592,8 @@ bool Options::ReadFromDoc(TiXmlDocument& doc, bool readAll)
     READ_ATTRIBUTE(mControllerHorOffset);
     READ_ATTRIBUTE(mControllerVerOffset);
     READ_ATTRIBUTE(mJoystickID);
+    READ_ATTRIBUTE(mAutoConfigureJoystick);
+    READ_ATTRIBUTE(mAutoConfiguredJoystickDevice);
     READ_ATTRIBUTE(mControllerStaggered);
     READ_ENUM_ATTRIBUTE(mControllerStyle);
     READ_ATTRIBUTE(mControllerAlpha);
@@ -605,6 +639,9 @@ bool Options::ReadFromDoc(TiXmlDocument& doc, bool readAll)
     READ_ATTRIBUTE(mGLVersion);
     READ_ATTRIBUTE(mEnableSmoke);
     READ_ATTRIBUTE(mSmokeQuality);
+    READ_ATTRIBUTE(mShowWindStreamlines);
+    READ_ATTRIBUTE(mShowThermals);
+    READ_ATTRIBUTE(mShowTurbulence);
 
     if (readAll)
     {
@@ -832,6 +869,29 @@ bool TerrainSettings::ReadFromDoc(TiXmlDocument& doc, bool readAll)
     READ_ATTRIBUTE(mFileTerrainName);
     READ_ATTRIBUTE(mFileTerrainMinZ);
     READ_ATTRIBUTE(mFileTerrainMaxZ);
+
+    // Opt-in terrain splatting: <TerrainLayers><Layer .../>...</TerrainLayers>
+    // nested inside <TerrainSettings>. Absent => mTerrainLayers stays empty and
+    // the legacy dual-texture terrain path is used unchanged.
+    mTerrainLayers.clear();
+    TiXmlElement* layersElement = element->FirstChildElement("TerrainLayers");
+    if (layersElement)
+    {
+        for (TiXmlElement* layerElement = layersElement->FirstChildElement("Layer");
+             layerElement != 0;
+             layerElement = layerElement->NextSiblingElement("Layer"))
+        {
+            TerrainLayer layer;
+            readFromXML(layerElement, "texture",   layer.mTexture);
+            readFromXML(layerElement, "heightMin", layer.mHeightMin);
+            readFromXML(layerElement, "heightMax", layer.mHeightMax);
+            readFromXML(layerElement, "slopeMin",  layer.mSlopeMin);
+            readFromXML(layerElement, "slopeMax",  layer.mSlopeMax);
+            readFromXML(layerElement, "scale",     layer.mScale);
+            if (!layer.mTexture.empty())
+                mTerrainLayers.push_back(layer);
+        }
+    }
 
     Upgrade(doc);
 
@@ -1172,7 +1232,14 @@ EnvironmentSettings::EnvironmentSettings() :
     mRunwayPosition(0.0f, 0.0f, 0.0f),
     mRunwayAngle(0.0f),
     mRunwayLength(40.0f),
-    mRunwayWidth(15.0f)
+    mRunwayWidth(15.0f),
+    mDynamicSkyEnabled(false),
+    mDynamicSkyTimeOfDay(14.0f),
+    mDynamicSkyTimeScale(0.0f),
+    mDynamicSkyLatitude(45.0f),
+    mDynamicSkyTurbidity(3.0f),
+    mDynamicSkyCloudCover(0.0f),
+    mDynamicSkyGroundAlbedo(0.1f)
 {
     TRACE_METHOD_ONLY(1);
 }
@@ -1235,6 +1302,20 @@ bool EnvironmentSettings::WriteToDoc(TiXmlDocument& doc) const
 
     mTerrainSettings.WriteToDoc(doc);
     mAIEnvironmentSettings.WriteToDoc(doc);
+
+    // Optional procedural dynamic sky - only written when enabled, so environments
+    // that don't use it are byte-for-byte unchanged.
+    if (mDynamicSkyEnabled)
+    {
+        TiXmlElement* sky = new TiXmlElement("DynamicSky");
+        doc.LinkEndChild(sky);
+        writeToXML(mDynamicSkyTimeOfDay,    sky, "timeOfDay");
+        writeToXML(mDynamicSkyTimeScale,    sky, "timeScale");
+        writeToXML(mDynamicSkyLatitude,     sky, "latitude");
+        writeToXML(mDynamicSkyTurbidity,    sky, "turbidity");
+        writeToXML(mDynamicSkyCloudCover,   sky, "cloudCover");
+        writeToXML(mDynamicSkyGroundAlbedo, sky, "groundAlbedo");
+    }
     return true;
 }
 
@@ -1325,6 +1406,23 @@ bool EnvironmentSettings::ReadFromDoc(TiXmlDocument& doc, bool readAll)
 
     mTerrainSettings.ReadFromDoc(doc, readAll);
     mAIEnvironmentSettings.ReadFromDoc(doc, readAll);
+
+    // Optional procedural dynamic sky. Presence of the element selects the
+    // procedural path; absence leaves the photo skybox/panorama path untouched.
+    {
+        TiXmlHandle docHandle2( &doc );
+        TiXmlElement* sky = docHandle2.FirstChild( "DynamicSky" ).ToElement();
+        if (sky)
+        {
+            mDynamicSkyEnabled = true;
+            readFromXML(sky, "timeOfDay",    mDynamicSkyTimeOfDay);
+            readFromXML(sky, "timeScale",    mDynamicSkyTimeScale);
+            readFromXML(sky, "latitude",     mDynamicSkyLatitude);
+            readFromXML(sky, "turbidity",    mDynamicSkyTurbidity);
+            readFromXML(sky, "cloudCover",   mDynamicSkyCloudCover);
+            readFromXML(sky, "groundAlbedo", mDynamicSkyGroundAlbedo);
+        }
+    }
 
     Upgrade(doc);
 

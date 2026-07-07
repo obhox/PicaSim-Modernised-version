@@ -30,6 +30,20 @@ public:
 
     Vector3 GetNearestThermalPosition(const Vector3& pos, float& bestDist) const;
 
+    /// Read-only snapshot of the currently active thermal columns, used by the
+    /// optional weather-visualization overlay (WeatherVisualization). This does
+    /// not modify the thermal field in any way.
+    struct ThermalVisInfo
+    {
+        Vector3 mPos;          ///< Column reference position (world)
+        float   mCoreRadius;   ///< Current updraft core radius (GetRadius1)
+        float   mOuterRadius;  ///< Current outer/downdraft radius (GetRadius3)
+        float   mDepth;        ///< Current vertical extent (GetDepth)
+        float   mUpdraftSpeed; ///< Current activity-scaled core updraft speed
+        float   mActivity;     ///< 0..1 ramp over the thermal's life
+    };
+    void GetThermalVisInfo(std::vector<ThermalVisInfo>& out) const;
+
 private:
     struct Thermal
     {

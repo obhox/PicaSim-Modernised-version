@@ -1,9 +1,40 @@
 #include "RenderModel.h"
 #include "ShaderManager.h"
 #include "Shaders.h"
+#include "Graphics.h"
 #include "tinyxml.h"
 
 #include <map>
+
+//======================================================================================================================
+// Applies the current CSM receiving uniforms (gCsmState) to a model shader. When
+// CSM is off (or this is a flat/forceColour pass) it just switches u_csmEnabled
+// off so the shader behaves exactly as before. Returns the world-matrix uniform
+// location to fill per-draw (or -1).
+static int ApplyCsmToModelShader(const ModelShader* ms, bool forceColour)
+{
+    if (ms->u_csmEnabled < 0)
+        return -1;
+
+    bool receive = (gCsmState.mEnabled != 0) && !forceColour;
+    glUniform1f(ms->u_csmEnabled, receive ? 1.0f : 0.0f);
+    if (!receive)
+        return -1;
+
+    if (ms->u_shadowMap >= 0)
+    {
+        glActiveTexture(GL_TEXTURE0 + gCsmState.mShadowUnit);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, gCsmState.mShadowTexArray);
+        glUniform1i(ms->u_shadowMap, gCsmState.mShadowUnit);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    if (ms->u_cascadeViewProj >= 0)
+        glUniformMatrix4fv(ms->u_cascadeViewProj, gCsmState.mNumCascades, GL_FALSE, &gCsmState.mCascadeViewProj[0][0]);
+    if (ms->u_csmBias >= 0)
+        glUniform1f(ms->u_csmBias, gCsmState.mBias);
+
+    return ms->u_worldMatrix;
+}
 
 //======================================================================================================================
 // PBR-lite material handling.
@@ -475,7 +506,58 @@ void RenderModel::Init(
 }
 
 //======================================================================================================================
-void RenderModel::CalculateBoundingRadius() 
+// glTF path. GltfLoader has already done all the heavy lifting (attribute
+// reading, material mapping, node-transform baking and axis conversion), so this
+// simply moves the per-component vertex arrays into RenderModel::Components,
+// resolves textures through the shared Texture path, and builds the VBOs. The
+// result is byte-for-byte the same Component layout the AC3D path produces, so
+// every downstream consumer (PBR shaders, CSM caster, bounds, component
+// animation via SetComponentTM) works unchanged.
+void RenderModel::Init(const GltfModelData& data, bool cullBackFaces, bool rgb565, float colourOffset)
+{
+    TRACE_METHOD_ONLY(1);
+    Terminate();
+
+    mCullBackFaces = cullBackFaces;
+
+    for (size_t i = 0; i != data.size(); ++i)
+    {
+        const GltfComponentData& src = data[i];
+        mComponents.push_back(Component(src.mName));
+        Component* component = &mComponents.back();
+
+        if (!src.mTexturePath.empty())
+        {
+            // Pass the already-resolved path as the texture name with an empty
+            // model file so getTextureID uses it verbatim.
+            component->mTexture = getTextureID(src.mTexturePath, "", rgb565, colourOffset);
+            component->mTextureName = src.mTexturePath;
+        }
+
+        component->mTexturedVertices = src.mTexturedVertices;
+        component->mUntexturedVertices = src.mUntexturedVertices;
+        component->mRoughness = src.mRoughness;
+        component->mMetallic = src.mMetallic;
+
+        // If the texture failed to load, fall back to the untextured colour path
+        // (GltfLoader always fills mUntexturedVertices as a colour fallback).
+        if (component->mTexture == 0)
+            component->mTexturedVertices.clear();
+
+        // Drop any component that has no drawable data for its buffer type;
+        // CreateVertexBuffers indexes element [0] and must not see an empty array.
+        bool usable = (component->mTexture != 0) ? !component->mTexturedVertices.empty()
+                                                 : !component->mUntexturedVertices.empty();
+        if (!usable)
+            mComponents.pop_back();
+    }
+
+    CreateVertexBuffers();
+    CalculateBoundingRadius();
+}
+
+//======================================================================================================================
+void RenderModel::CalculateBoundingRadius()
 {
     mBoundingRadius = 0.0f;
     for (size_t iComponent = 0 ; iComponent != mComponents.size() ; ++iComponent)
@@ -627,6 +709,18 @@ void RenderModel::SetAlphaScale(const std::string& componentName, float alphaSca
 }
 
 //======================================================================================================================
+void RenderModel::SetGlobalAlphaScale(float alphaScale)
+{
+    for (Components::iterator it = mComponents.begin() ; it != mComponents.end() ; ++it)
+    {
+        Component& component = *it;
+        component.mAlphaScale = alphaScale;
+        for (UntexturedVertices::iterator vit = component.mUntexturedVertices.begin() ; vit != component.mUntexturedVertices.end() ; ++vit)
+            vit->mColour[3] = alphaScale;
+    }
+}
+
+//======================================================================================================================
 void RenderModel::Render(const Vector4* colour, bool forceColour, bool separateSpecular) const
 {
     if (!IsCreated())
@@ -676,6 +770,7 @@ void RenderModel::Render(const Vector4* colour, bool forceColour, bool separateS
 bool RenderModel::PartRenderPre(const Vector4* colour, bool forceColour, ShaderProgramModelInfo& shaderInfo, int componentIndex, bool separateSpecular) const
 {
     const Component& component = mComponents[componentIndex];
+    shaderInfo.worldMatrixLoc = -1;
     if (component.mTexture == 0 && component.mUntexturedVertices.empty())
         return false;
     if (component.mTexture != 0 && component.mTexturedVertices.empty())
@@ -837,6 +932,9 @@ bool RenderModel::PartRenderPre(const Vector4* colour, bool forceColour, ShaderP
         if (ms->u_metallic >= 0)       glUniform1f(ms->u_metallic, component.mMetallic);
         if (ms->u_shAmbientScale >= 0) glUniform1f(ms->u_shAmbientScale, gModelPBRState.shAmbientScale);
         if (ms->u_shCoeffs >= 0)       glUniform3fv(ms->u_shCoeffs, 9, &gModelPBRState.shCoeffs[0][0]);
+
+        // CSM receiving (aircraft self / inter-shadow). Off unless mShadowMode==2.
+        shaderInfo.worldMatrixLoc = ApplyCsmToModelShader(ms, forceColour);
     }
     return true;
 }
@@ -854,10 +952,61 @@ void RenderModel::PartRender(const Vector4* colour, bool forceColour, ShaderProg
         }
     }
     esSetModelViewProjectionAndNormalMatrix(shaderInfo.mvpLoc, shaderInfo.normalMatrixLoc);
+    // CSM: supply the model-space -> world-space matrix so the shader can compute
+    // a world position for the shadow lookup (only when CSM receiving is active).
+    if (shaderInfo.worldMatrixLoc >= 0)
+        esSetWorldMatrix(shaderInfo.worldMatrixLoc);
     if (component.mTexture)
         glDrawArrays(GL_TRIANGLES, 0, component.mTexturedVertices.size());
     else
         glDrawArrays(GL_TRIANGLES, 0, component.mUntexturedVertices.size());
+}
+
+//======================================================================================================================
+void RenderModel::RenderDepthOnly(const ShadowCastShader* shader) const
+{
+    if (!IsCreated())
+        return;
+
+    glEnableVertexAttribArray(shader->a_position);
+
+    int index = 0;
+    for (Components::const_iterator it = mComponents.begin(); it != mComponents.end(); ++it, ++index)
+    {
+        const Component& component = *it;
+        bool textured = (component.mTexture != 0);
+        if (textured && component.mTexturedVertices.empty())
+            continue;
+        if (!textured && component.mUntexturedVertices.empty())
+            continue;
+
+        esPushMatrix();
+        GLMat44 glTM;
+        ConvertTransformToGLMat44(component.mTM, glTM);
+        esMultMatrixf(&glTM[0][0]);
+
+        size_t elementSize = textured ? sizeof(TexturedVertex) : sizeof(UntexturedVertex);
+        size_t start = textured ? (size_t)(&component.mTexturedVertices[0])
+                                 : (size_t)(&component.mUntexturedVertices[0]);
+        if (component.mVertexBuffer)
+        {
+            glBindBuffer(GL_ARRAY_BUFFER, component.mVertexBuffer);
+            start = 0;
+        }
+
+        glVertexAttribPointer(shader->a_position, 3, GL_FLOAT, GL_FALSE, elementSize, (GLvoid*)start);
+        esSetModelViewProjectionMatrix(shader->u_mvpMatrix);
+
+        size_t count = textured ? component.mTexturedVertices.size() : component.mUntexturedVertices.size();
+        glDrawArrays(GL_TRIANGLES, 0, count);
+
+        if (component.mVertexBuffer)
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        esPopMatrix();
+    }
+
+    glDisableVertexAttribArray(shader->a_position);
 }
 
 //======================================================================================================================

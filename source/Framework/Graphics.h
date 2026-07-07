@@ -31,6 +31,34 @@
 #endif
 #endif
 
+// Legacy GL enums that the renderer uses ONLY as CPU-side array indices in the
+// es* matrix/light helpers (e.g. `mode - GL_MODELVIEW`, `GL_LIGHT0 + i`). Core
+// GL headers (macOS gl3.h, and glad generated for a core profile) no longer
+// define them. Provide the canonical values on any platform whose GL loader
+// omits them, so the index arithmetic compiles regardless of the loader's
+// profile. #ifndef-guarded, so a compatibility loader that already defines them
+// is left untouched. (On macOS these also come from the force-included
+// GLCompat.h; the guards make that harmless.)
+#ifndef GL_MODELVIEW
+#define GL_MODELVIEW  0x1700
+#endif
+#ifndef GL_PROJECTION
+#define GL_PROJECTION 0x1701
+#endif
+#ifndef GL_TEXTURE
+#define GL_TEXTURE    0x1702
+#endif
+#ifndef GL_LIGHT0
+#define GL_LIGHT0 0x4000
+#define GL_LIGHT1 0x4001
+#define GL_LIGHT2 0x4002
+#define GL_LIGHT3 0x4003
+#define GL_LIGHT4 0x4004
+#define GL_LIGHT5 0x4005
+#define GL_LIGHT6 0x4006
+#define GL_LIGHT7 0x4007
+#endif
+
 // GL error checking for debug builds. PICASIM_CHECK_GL_ERRORS() drains the GL
 // error queue and reports each error with the call site. Compiles to nothing
 // in release builds.
@@ -289,6 +317,39 @@ void esComputeModelPBRState(bool usePBR, float shAmbientScale,
                             const GLfloat ambientColour[4],
                             const GLfloat sunDiffuseColour[4],
                             float sunAmbientFill);
+
+//======================================================================================================================
+// Cascaded Shadow Map (CSM) per-frame state. Filled once per frame by
+// RenderManager's CSM pass (when FrameworkSettings::mShadowMode == 2) and read by
+// the lit shaders (model / terrain-shadow decal) during the main pass. When
+// mEnabled is 0 the shaders behave exactly as before (blob / no CSM).
+//
+// cascadeViewProj are STANDARD (glm/column-major) world->light-clip matrices,
+// uploaded to the shaders with transpose = GL_FALSE. mShadowTexArray is a
+// GL_TEXTURE_2D_ARRAY depth texture bound (for sampling) on texture unit
+// mShadowUnit.
+struct CsmState
+{
+    int          mEnabled;                 // 0 = off (default), 1 = CSM active
+    unsigned int mShadowTexArray;          // GLuint depth array handle
+    int          mShadowUnit;              // texture unit the array is bound on (e.g. 4)
+    int          mNumCascades;             // == ShadowManager::NUM_CASCADES
+    float        mCascadeViewProj[3][16];  // world->light-clip, one per cascade
+    float        mBias;                    // depth-compare bias (tuning knob)
+    float        mShadowStrength;          // terrain decal darkening strength
+};
+extern CsmState gCsmState;
+
+// Capture the CURRENT GL_MODELVIEW as the camera view matrix and pre-compute its
+// inverse, so esSetWorldMatrix() can recover a model's world matrix during the
+// main pass. Call once per viewport after the camera view has been set up (the
+// modelview is the pure view at that point).
+void esCaptureViewForShadows();
+
+// Uploads the model-space -> world-space matrix (recovered from the current
+// GL_MODELVIEW and the captured view inverse) to the given uniform location. Used
+// so the model shaders can compute a world-space position for the CSM lookup.
+void esSetWorldMatrix(int worldMatrixLoc);
 
 // Returns the view transform (inverse of camera) as well as setting up the GL modelview matrix (OpenGL 1)
 void LookAt(

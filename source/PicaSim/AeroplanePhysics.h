@@ -8,6 +8,7 @@
 #include "btDistanceConstraint.h"
 #include "Rope.h"
 #include "Wheel.h"
+#include "DamageManager.h"
 
 #include <vector>
 
@@ -133,6 +134,10 @@ public:
     /// Returns the force associated with the tow rope, or zero if it doesn't exist
     float GetTowForce() const;
 
+    /// Crash-damage state (break-off components + debris). Inert unless enabled.
+    DamageManager& GetDamageManager() {return mDamageManager;}
+    const DamageManager& GetDamageManager() const {return mDamageManager;}
+
 private:
     /// This gets called to update the positions etc of the wings
     void UpdateComponentsPostPhysics(float deltaTime, bool checkForCrash);
@@ -208,6 +213,10 @@ private:
 
     float mFlutterDragSpeed;
     float mFlutterDragScale;
+
+    /// Opt-in crash damage (break-off panels + debris). Does nothing unless
+    /// FrameworkSettings::mCrashDamage is set.
+    DamageManager mDamageManager;
 };
 
 #endif

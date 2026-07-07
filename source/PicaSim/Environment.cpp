@@ -38,60 +38,88 @@ bool Environment::Init(LoadingScreenHelper* loadingScreen)
     float shadowStrength = 0.2f;
     float shadowDecayHeight = 40.0f;
     float shadowSizeScale = 1.3f;
-    std::string skyboxName;
 
-    if (gs.mEnvironmentSettings.mTerrainSettings.mType == TerrainSettings::TYPE_PANORAMA)
-        skyboxName = gs.mEnvironmentSettings.mTerrainSettings.mPanoramaName;
-    else
-        skyboxName = gs.mLightingSettings.mSkyboxName;
-
-    std::string lightingFile = skyboxName + "/Lighting.xml";
-    TiXmlDocument doc(lightingFile);
-    bool success = doc.LoadFile();
-    IwAssert(ROWLHOUSE, success);
-
-    if (!success)
+    if (gs.mEnvironmentSettings.mDynamicSkyEnabled)
     {
-        // tidy up and return failure
-        const Language language = PicaSim::GetInstance().GetSettings().mOptions.mLanguage;
-        ShowDialog("PicaSim", "Failed to load environment - please load one of the scenery presets and try again", TXT(PS_OK));
-        return false;
-    }
+        // ---- New procedural "dynamic sky" path -----------------------------
+        // No photo skybox and no Lighting.xml: the sun direction, sun (diffuse)
+        // colour and sky (ambient) colour all come from the time-of-day model,
+        // pushed into RenderManager so PBR + CSM track the sun automatically.
+        if (loadingScreen) loadingScreen->Update("Dynamic sky");
 
-    TiXmlHandle docHandle( &doc );
-    TiXmlElement* element = docHandle.FirstChild( "Lighting" ).ToElement();
-    if (element)
-    {
-        readFromXML(element, "lightBearing", lightBearing);
-        readFromXML(element, "lightElevation", lightElevation);
-        readFromXML(element, "ambientLightR", ambientLight.x);
-        readFromXML(element, "ambientLightG", ambientLight.y);
-        readFromXML(element, "ambientLightB", ambientLight.z);
-        readFromXML(element, "diffuseLightR", diffuseLight.x);
-        readFromXML(element, "diffuseLightG", diffuseLight.y);
-        readFromXML(element, "diffuseLightB", diffuseLight.z);
-        readFromXML(element, "shadowStrength", shadowStrength);
-        readFromXML(element, "shadowDecayHeight", shadowDecayHeight);
-        readFromXML(element, "shadowSizeScale", shadowSizeScale);
-    }
+        RenderManager::GetInstance().SetShadowStrength(shadowStrength);
+        RenderManager::GetInstance().SetShadowDecayHeight(shadowDecayHeight);
+        RenderManager::GetInstance().SetShadowSizeScale(shadowSizeScale);
 
-    RenderManager::GetInstance().SetLightingAmbientColour(ambientLight * gs.mOptions.mAmbientLightingScale);
-    RenderManager::GetInstance().SetLightingDiffuseColour(diffuseLight * gs.mOptions.mDiffuseLightingScale);
-    RenderManager::GetInstance().SetShadowStrength(shadowStrength);
-    RenderManager::GetInstance().SetShadowDecayHeight(shadowDecayHeight);
-    RenderManager::GetInstance().SetShadowSizeScale(shadowSizeScale);
+        ProceduralSky::Params p;
+        const EnvironmentSettings& es = gs.mEnvironmentSettings;
+        p.mTimeOfDay    = es.mDynamicSkyTimeOfDay;
+        p.mTimeScale    = es.mDynamicSkyTimeScale;
+        p.mLatitude     = es.mDynamicSkyLatitude;
+        p.mTurbidity    = es.mDynamicSkyTurbidity;
+        p.mCloudCover   = es.mDynamicSkyCloudCover;
+        p.mGroundAlbedo = es.mDynamicSkyGroundAlbedo;
 
-    mInstance->mSkybox.Init(skyboxName.c_str(), gs.mOptions.m16BitTextures, gs.mOptions.mMaxSkyboxDetail, loadingScreen);
-
-    if (gs.mEnvironmentSettings.mTerrainSettings.mType == TerrainSettings::TYPE_PANORAMA)
-    {
-        mInstance->mSkybox.SetOffset(-90.0f);
-        RenderManager::GetInstance().SetLightingDirection(lightBearing - 90.0f, lightElevation);
+        mInstance->mProceduralSky = new ProceduralSky();
+        mInstance->mProceduralSky->Init(p);   // registers at RENDER_LEVEL_SKYBOX + sets initial sun
     }
     else
     {
-        mInstance->mSkybox.SetOffset((float) gs.mLightingSettings.mSunBearingOffset);
-        RenderManager::GetInstance().SetLightingDirection(lightBearing + gs.mLightingSettings.mSunBearingOffset, lightElevation);
+        // ---- Existing photo skybox / panorama path (UNCHANGED) -------------
+        std::string skyboxName;
+        if (gs.mEnvironmentSettings.mTerrainSettings.mType == TerrainSettings::TYPE_PANORAMA)
+            skyboxName = gs.mEnvironmentSettings.mTerrainSettings.mPanoramaName;
+        else
+            skyboxName = gs.mLightingSettings.mSkyboxName;
+
+        std::string lightingFile = skyboxName + "/Lighting.xml";
+        TiXmlDocument doc(lightingFile);
+        bool success = doc.LoadFile();
+        IwAssert(ROWLHOUSE, success);
+
+        if (!success)
+        {
+            // tidy up and return failure
+            const Language language = PicaSim::GetInstance().GetSettings().mOptions.mLanguage;
+            ShowDialog("PicaSim", "Failed to load environment - please load one of the scenery presets and try again", TXT(PS_OK));
+            return false;
+        }
+
+        TiXmlHandle docHandle( &doc );
+        TiXmlElement* element = docHandle.FirstChild( "Lighting" ).ToElement();
+        if (element)
+        {
+            readFromXML(element, "lightBearing", lightBearing);
+            readFromXML(element, "lightElevation", lightElevation);
+            readFromXML(element, "ambientLightR", ambientLight.x);
+            readFromXML(element, "ambientLightG", ambientLight.y);
+            readFromXML(element, "ambientLightB", ambientLight.z);
+            readFromXML(element, "diffuseLightR", diffuseLight.x);
+            readFromXML(element, "diffuseLightG", diffuseLight.y);
+            readFromXML(element, "diffuseLightB", diffuseLight.z);
+            readFromXML(element, "shadowStrength", shadowStrength);
+            readFromXML(element, "shadowDecayHeight", shadowDecayHeight);
+            readFromXML(element, "shadowSizeScale", shadowSizeScale);
+        }
+
+        RenderManager::GetInstance().SetLightingAmbientColour(ambientLight * gs.mOptions.mAmbientLightingScale);
+        RenderManager::GetInstance().SetLightingDiffuseColour(diffuseLight * gs.mOptions.mDiffuseLightingScale);
+        RenderManager::GetInstance().SetShadowStrength(shadowStrength);
+        RenderManager::GetInstance().SetShadowDecayHeight(shadowDecayHeight);
+        RenderManager::GetInstance().SetShadowSizeScale(shadowSizeScale);
+
+        mInstance->mSkybox.Init(skyboxName.c_str(), gs.mOptions.m16BitTextures, gs.mOptions.mMaxSkyboxDetail, loadingScreen);
+
+        if (gs.mEnvironmentSettings.mTerrainSettings.mType == TerrainSettings::TYPE_PANORAMA)
+        {
+            mInstance->mSkybox.SetOffset(-90.0f);
+            RenderManager::GetInstance().SetLightingDirection(lightBearing - 90.0f, lightElevation);
+        }
+        else
+        {
+            mInstance->mSkybox.SetOffset((float) gs.mLightingSettings.mSunBearingOffset);
+            RenderManager::GetInstance().SetLightingDirection(lightBearing + gs.mLightingSettings.mSunBearingOffset, lightElevation);
+        }
     }
 
     mInstance->mTerrain.Init(EntityManager::GetInstance().GetDynamicsWorld(), loadingScreen, mInstance->mChecksum);
@@ -152,6 +180,12 @@ void Environment::Terminate()
 
     mInstance->mThermalManager.Terminate();
     mInstance->mSkybox.Terminate();
+    if (mInstance->mProceduralSky)
+    {
+        mInstance->mProceduralSky->Terminate();
+        delete mInstance->mProceduralSky;
+        mInstance->mProceduralSky = 0;
+    }
     mInstance->mTerrain.Terminate();
 
     delete mInstance->mRunway;
@@ -185,7 +219,7 @@ void Environment::Terminate()
 }
 
 //======================================================================================================================
-Environment::Environment() : mTime(0.0f), mObjectEditingOverlay(0), mRunway(0)
+Environment::Environment() : mTime(0.0f), mObjectEditingOverlay(0), mRunway(0), mProceduralSky(0)
 {
 }
 
@@ -241,6 +275,11 @@ void Environment::EntityUpdate(float deltaTime, int entityLevel)
     ObjectsSettings& os = gs.mObjectsSettings;
 
     mTime += deltaTime;
+
+    // Advance the procedural sun (if any) and re-push the sun/lighting so PBR +
+    // CSM track the time-of-day.
+    if (mProceduralSky)
+        mProceduralSky->Update(deltaTime);
 
     UpdateWind(deltaTime);
 

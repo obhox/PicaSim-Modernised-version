@@ -23,6 +23,12 @@ public:
     float getControl() const {return mControl;}
     float getFlapAngle() const {return mFlapAngle + mSlopAngle;}
 
+    /// Crash damage: per-wing (panel) aerodynamic effectiveness. 1.0 = intact,
+    /// 0.0 = broken off (no lift/drag). Default 1.0 -> no behaviour change.
+    float GetEffectiveness() const {return mEffectiveness;}
+    void SetEffectiveness(float effectiveness) {mEffectiveness = effectiveness;}
+    bool GetIsMainWing() const {return mIsMainWing;}
+
     /// Opportunity to apply forces
     void UpdatePrePhysics(float deltaTime, const struct TurbulenceData& turbulenceData);
 
@@ -57,6 +63,9 @@ private:
 
     /// The actual control (servo position)
     float mControl;
+
+    /// Crash damage effectiveness (1.0 = intact). See GetEffectiveness().
+    float mEffectiveness;
 
     /// Constant data shared between aerofoils within a wing, but may be different between wings
     float mDegreesPerControl;

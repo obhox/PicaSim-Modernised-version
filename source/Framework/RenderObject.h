@@ -14,6 +14,13 @@ public:
 
     virtual void RenderUpdate(class Viewport* viewport, int renderLevel) = 0;
 
+    /// CSM depth-only caster draw. Called once per cascade (with the cascade's
+    /// world->light-clip matrix on the engine matrix stack and the shadowcast
+    /// program bound) for objects registered as shadow casters. Default: no-op, so
+    /// only objects that override this cast CSM shadows. The blob-shadow path is
+    /// unaffected.
+    virtual void RenderShadowCast() {}
+
     virtual const Transform& GetTM() const {return Transform::g_Identity;}
 
     virtual float GetRenderBoundingRadius() const {return FLT_MAX;}

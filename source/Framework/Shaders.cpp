@@ -144,6 +144,22 @@ void SkyboxShader::Init()
 }
 
 //======================================================================================================================
+void ProceduralSkyShader::Init()
+{
+    Shader::InitFromFiles("sky_hosek.vert", "sky_hosek.frag");
+    u_invViewProjRot = getUniformLocation(mShaderProgram, "u_invViewProjRot");
+    u_sunDir         = getUniformLocation(mShaderProgram, "u_sunDir");
+    u_perezY         = getUniformLocation(mShaderProgram, "u_perezY[0]");
+    u_perezx         = getUniformLocation(mShaderProgram, "u_perezx[0]");
+    u_perezy         = getUniformLocation(mShaderProgram, "u_perezy[0]");
+    u_zenith         = getUniformLocation(mShaderProgram, "u_zenith");
+    u_sunTheta       = getUniformLocation(mShaderProgram, "u_sunTheta");
+    u_skyBrightness  = getUniformLocation(mShaderProgram, "u_skyBrightness");
+    u_cloudCover     = getUniformLocation(mShaderProgram, "u_cloudCover");
+    u_time           = getUniformLocation(mShaderProgram, "u_time");
+}
+
+//======================================================================================================================
 void OverlayShader::Init()
 {
     Shader::InitFromFiles("overlay.vert", "overlay.frag");
@@ -198,6 +214,23 @@ void ModelShader::SetupVars()
     u_metallic            = getUniformLocationOpt(mShaderProgram, "u_metallic");
     u_shCoeffs            = getUniformLocationOpt(mShaderProgram, "u_shCoeffs[0]");
     u_shAmbientScale      = getUniformLocationOpt(mShaderProgram, "u_shAmbientScale");
+    // CSM receiving (optional).
+    u_worldMatrix         = getUniformLocationOpt(mShaderProgram, "u_worldMatrix");
+    u_csmEnabled          = getUniformLocationOpt(mShaderProgram, "u_csmEnabled");
+    u_shadowMap           = getUniformLocationOpt(mShaderProgram, "u_shadowMap");
+    u_cascadeViewProj     = getUniformLocationOpt(mShaderProgram, "u_cascadeViewProj[0]");
+    u_csmBias             = getUniformLocationOpt(mShaderProgram, "u_csmBias");
+
+    // Point the shadow-array sampler at its dedicated texture unit (4) up-front so
+    // it never aliases the albedo sampler on unit 0. On strict core profiles two
+    // samplers of different types sharing a unit is an error even if the shadow
+    // one is never sampled (CSM off) - this avoids that entirely.
+    if (u_shadowMap >= 0)
+    {
+        glUseProgram(mShaderProgram);
+        glUniform1i(u_shadowMap, 4);
+        glUseProgram(0);
+    }
 }
 
 
@@ -253,6 +286,43 @@ void TerrainPanoramaShader::Init()
 }
 
 //======================================================================================================================
+void TerrainSplatShader::Init()
+{
+    Shader::InitFromFiles("terrain_splat.vert", "terrain_splat.frag");
+    u_mvpMatrix       = getUniformLocation(mShaderProgram, "u_mvpMatrix");
+    u_textureMatrix0  = getUniformLocation(mShaderProgram, "u_textureMatrix0");
+    a_position        = getAttribLocation(mShaderProgram, "a_position");
+    u_lightmap        = getUniformLocation(mShaderProgram, "u_lightmap");
+    // Array uniforms: query the [0] element; the driver reports contiguous
+    // locations so glUniform*v with the [0] location fills the whole array.
+    u_layerTex        = getUniformLocation(mShaderProgram, "u_layerTex[0]");
+    u_numLayers       = getUniformLocation(mShaderProgram, "u_numLayers");
+    u_layerHeight     = getUniformLocation(mShaderProgram, "u_layerHeight[0]");
+    u_layerSlope      = getUniformLocation(mShaderProgram, "u_layerSlope[0]");
+    u_layerScale      = getUniformLocation(mShaderProgram, "u_layerScale[0]");
+    u_cameraPos       = getUniformLocation(mShaderProgram, "u_cameraPos");
+    u_shadeGain       = getUniformLocation(mShaderProgram, "u_shadeGain");
+    u_detailFadeStart = getUniformLocation(mShaderProgram, "u_detailFadeStart");
+    u_detailFadeEnd   = getUniformLocation(mShaderProgram, "u_detailFadeEnd");
+}
+
+//======================================================================================================================
+void PlainWaterShader::Init()
+{
+    Shader::InitFromFiles("plain_water.vert", "plain_water.frag");
+    u_mvpMatrix     = getUniformLocation(mShaderProgram, "u_mvpMatrix");
+    u_textureMatrix = getUniformLocation(mShaderProgram, "u_textureMatrix");
+    a_position      = getAttribLocation(mShaderProgram, "a_position");
+    a_colour        = getAttribLocation(mShaderProgram, "a_colour");
+    u_texture       = getUniformLocation(mShaderProgram, "u_texture");
+    u_cameraPos     = getUniformLocation(mShaderProgram, "u_cameraPos");
+    u_lightDir      = getUniformLocation(mShaderProgram, "u_lightDir");
+    u_skyColour     = getUniformLocation(mShaderProgram, "u_skyColour");
+    u_sunColour     = getUniformLocation(mShaderProgram, "u_sunColour");
+    u_time          = getUniformLocation(mShaderProgram, "u_time");
+}
+
+//======================================================================================================================
 void ShadowShader::Init()
 {
     Shader::InitFromFiles("shadow.vert", "shadow.frag");
@@ -273,6 +343,33 @@ void SmokeShader::Init()
     a_texCoord       = getAttribLocation(mShaderProgram, "a_texCoord");
     u_colour         = getUniformLocation(mShaderProgram, "u_colour");
     u_texture        = getUniformLocation(mShaderProgram, "u_texture");
+}
+
+//======================================================================================================================
+void ShadowCastShader::Init()
+{
+    Shader::InitFromFiles("shadowcast.vert", "shadowcast.frag");
+    u_mvpMatrix      = getUniformLocation(mShaderProgram, "u_mvpMatrix");
+    a_position       = getAttribLocation(mShaderProgram, "a_position");
+}
+
+//======================================================================================================================
+void TerrainShadowCsmShader::Init()
+{
+    Shader::InitFromFiles("terrainshadowcsm.vert", "terrainshadowcsm.frag");
+    u_mvpMatrix       = getUniformLocation(mShaderProgram, "u_mvpMatrix");
+    a_position        = getAttribLocation(mShaderProgram, "a_position");
+    u_csmEnabled      = getUniformLocationOpt(mShaderProgram, "u_csmEnabled");
+    u_shadowMap       = getUniformLocationOpt(mShaderProgram, "u_shadowMap");
+    u_cascadeViewProj = getUniformLocationOpt(mShaderProgram, "u_cascadeViewProj[0]");
+    u_csmBias         = getUniformLocationOpt(mShaderProgram, "u_csmBias");
+    u_shadowStrength  = getUniformLocationOpt(mShaderProgram, "u_shadowStrength");
+    if (u_shadowMap >= 0)
+    {
+        glUseProgram(mShaderProgram);
+        glUniform1i(u_shadowMap, 4);
+        glUseProgram(0);
+    }
 }
 
 

@@ -637,6 +637,10 @@ void SettingsMenu::RenderOptions1Tab()
             if (mGameSettings.mChallengeSettings.mChallengeMode == ChallengeSettings::CHALLENGE_FREEFLY)
                 SettingsWidgets::SliderFloat(TXT(PS_TIMESCALE), options.mTimeScale, 0.1f, 1.0f);
             SettingsWidgets::SliderInt(TXT(PS_PHYSICSACCURACY), options.mFrameworkSettings.mPhysicsSubsteps, 4, 12);
+            // Opt-in crash damage: hard impacts break off wing panels (which fall
+            // away as debris and stop producing lift). Off by default so flight
+            // physics are unchanged.
+            SettingsWidgets::Checkbox("Crash damage (break-off parts)", options.mFrameworkSettings.mCrashDamage);
         }
         SettingsWidgets::EndSettingsBlock();
     }
@@ -717,6 +721,7 @@ void SettingsMenu::RenderOptions1Tab()
     SettingsWidgets::BeginSettingsBlock();
     {
         SettingsWidgets::Checkbox(TXT(PS_GRAPHFPS), options.mDisplayFPS);
+        SettingsWidgets::Checkbox("Telemetry window (F9)", options.mShowTelemetry);
         SettingsWidgets::SliderInt(TXT(PS_MAXMARKERSPERTHERMAL), options.mMaxMarkersPerThermal, 0, Options::MAX_MAX_MARKERS_PER_THERMAL);
         if (advanced)
             SettingsWidgets::Checkbox(TXT(PS_THERMALWINDFIELD), options.mDrawThermalWindField);
@@ -737,6 +742,17 @@ void SettingsMenu::RenderOptions1Tab()
 
         if (advanced)
             SettingsWidgets::SliderFloat(TXT(PS_SKYGRIDDISTANCE), options.mSkyGridDistance, 10.0f, 200.0f, "%.0f m");
+    }
+    SettingsWidgets::EndSettingsBlock();
+
+    // Air-visualization training aids (all default off). Literal labels are used
+    // here rather than localized TXT() strings to keep this change self-contained.
+    SettingsWidgets::SectionHeader("Air visualization");
+    SettingsWidgets::BeginSettingsBlock();
+    {
+        SettingsWidgets::Checkbox("Show wind streamlines", options.mShowWindStreamlines);
+        SettingsWidgets::Checkbox("Show thermals", options.mShowThermals);
+        SettingsWidgets::Checkbox("Show turbulence", options.mShowTurbulence);
     }
     SettingsWidgets::EndSettingsBlock();
 

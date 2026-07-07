@@ -21,6 +21,7 @@ Aeroplane::Aeroplane(Controller& controller)
     : mController(&controller)
 {
     mIncomingConnection = nullptr;
+    mGraphicsOnly = false;
     mGraphics = new AeroplaneGraphics;
     mPhysics = new AeroplanePhysics;
     mFlightTime = 0.0f;
@@ -41,10 +42,12 @@ Aeroplane::~Aeroplane()
 //======================================================================================================================
 void Aeroplane::Init(const AeroplaneSettings& as,
                      const Vector3* basicLaunchPos,
-                     LoadingScreenHelper* loadingScreen)
+                     LoadingScreenHelper* loadingScreen,
+                     bool graphicsOnly)
 {
     TRACE_METHOD_ONLY(1);
     mAeroplaneSettings = as;
+    mGraphicsOnly = graphicsOnly;
 
     if (loadingScreen) loadingScreen->Update("Aeroplane");
 
@@ -81,10 +84,39 @@ void Aeroplane::Init(const AeroplaneSettings& as,
         mLastLaunchPos = Vector3(0, 0, 0);
     }
 
-    if (loadingScreen) loadingScreen->Update("Aeroplane physics");
-    mPhysics->Init(doc, this, mChecksum);
+    if (!mGraphicsOnly)
+    {
+        if (loadingScreen) loadingScreen->Update("Aeroplane physics");
+        mPhysics->Init(doc, this, mChecksum);
+    }
     if (loadingScreen) loadingScreen->Update("Aeroplane graphics");
     mGraphics->Init(doc, this);
+
+    if (mGraphicsOnly)
+    {
+        // Pure graphical "ghost": no physics, audio, tug, or per-frame entity
+        // updates that would read physics. Its transform is driven externally
+        // via SetGraphicsTransform(). AeroplaneGraphics registered itself with
+        // the RenderManager/EntityManager during Init, so it still renders and
+        // animates from mTM. Initialise just the handful of members that other
+        // code (and the graphics) reads.
+        mTugController = 0;
+        mDebugAerofoilIndex = 0;
+        mCrashFlags = 0;
+        mBungeeAmount = 0.0f;
+        mAirDensity = 1.225f;
+        mLaunchMode = LAUNCHMODE_NONE;
+        mFlightTime = 0.0f;
+        mVelocity = Vector3(0, 0, 0);
+        mAngularVelocity = Vector3(0, 0, 0);
+        mSmoothedCameraTargetPos = mTM.GetTrans();
+        mSmoothedCameraTargetPosRate = Vector3(0, 0, 0);
+        mSmoothedCameraVelocity = Vector3(0, 0, 0);
+        mSmoothedCameraVelocityRate = Vector3(0, 0, 0);
+        mSmoothedVelocityForCamera = Vector3(0, 0, 0);
+        mSmoothedVelocityForCameraRate = Vector3(0, 0, 0);
+        return;
+    }
 
     EntityManager::GetInstance().RegisterEntity(this, ENTITY_LEVEL_POST_PHYSICS);
     EntityManager::GetInstance().RegisterEntity(this, ENTITY_LEVEL_LOOP_PRE_PHYSICS);
@@ -298,12 +330,17 @@ void Aeroplane::LaunchNormal(const Vector3& basicLaunchPos)
     TRACE_METHOD_ONLY(1);
 
     const EnvironmentSettings& es = PicaSim::GetInstance().GetSettings().mEnvironmentSettings;
+    const Options& options = PicaSim::GetInstance().GetSettings().mOptions;
     const AeroplaneSettings& as = mAeroplaneSettings;
     DimensionalScaling ds(as.mSizeScale, as.mMassScale, true);
 
+    // Additive launch tunables (default delta 0 / scale 1 -> identical to before).
+    const float launchAngleUp = mAeroplaneSettings.mLaunchAngleUp + options.mLaunchAngleUpDelta;
+    const float launchSpeed = mAeroplaneSettings.mLaunchSpeed * options.mLaunchSpeedScale;
+
     Vector3 fwdDir = -Environment::GetInstance().GetWindDirection(Environment::WIND_TYPE_SMOOTH | Environment::WIND_TYPE_GUSTY);
     Vector3 leftDir = -fwdDir.Cross(Vector3(0,0,1));
-    Quat q(leftDir, -DegreesToRadians(mAeroplaneSettings.mLaunchAngleUp));
+    Quat q(leftDir, -DegreesToRadians(launchAngleUp));
     Vector3 launchDir = q.RotateVector(fwdDir);
     SetRowX(mTM, launchDir);
     SetRowY(mTM, leftDir);
@@ -320,7 +357,7 @@ void Aeroplane::LaunchNormal(const Vector3& basicLaunchPos)
     mTM.SetTrans(mLastLaunchPos);
 
     Vector3 windAtLaunchPos = Environment::GetInstance().GetWindAtPosition(mTM.GetTrans(), Environment::WIND_TYPE_SMOOTH | Environment::WIND_TYPE_GUSTY);
-    Vector3 basicLaunchVel = mTM.RowX() * ds.GetScaledVel(mAeroplaneSettings.mLaunchSpeed);
+    Vector3 basicLaunchVel = mTM.RowX() * ds.GetScaledVel(launchSpeed);
     Vector3 launchVel = windAtLaunchPos + basicLaunchVel;
 
     if (launchVel.Dot(mTM.RowX()) < 0.0f)
@@ -373,12 +410,17 @@ bool Aeroplane::LaunchBungee(const Vector3& basicLaunchPos)
     TRACE_METHOD_ONLY(1);
 
     const EnvironmentSettings& es = PicaSim::GetInstance().GetSettings().mEnvironmentSettings;
+    const Options& options = PicaSim::GetInstance().GetSettings().mOptions;
     const AeroplaneSettings& as = mAeroplaneSettings;
     DimensionalScaling ds(as.mSizeScale, as.mMassScale, true);
 
+    // Additive launch tunables (default delta 0 / scale 1 -> identical to before).
+    const float launchAngleUp = mAeroplaneSettings.mLaunchAngleUp + options.mLaunchAngleUpDelta;
+    const float launchSpeed = mAeroplaneSettings.mLaunchSpeed * options.mLaunchSpeedScale;
+
     Vector3 fwdDir = -Environment::GetInstance().GetWindDirection(Environment::WIND_TYPE_SMOOTH | Environment::WIND_TYPE_GUSTY);
     Vector3 leftDir = -fwdDir.Cross(Vector3(0,0,1));
-    Quat q(leftDir, -DegreesToRadians(mAeroplaneSettings.mLaunchAngleUp));
+    Quat q(leftDir, -DegreesToRadians(launchAngleUp));
     Vector3 launchDir = q.RotateVector(fwdDir);
     SetRowX(mTM, launchDir);
     SetRowY(mTM, leftDir);
@@ -395,7 +437,7 @@ bool Aeroplane::LaunchBungee(const Vector3& basicLaunchPos)
     mTM.SetTrans(mLastLaunchPos);
 
     Vector3 windAtLaunchPos = Environment::GetInstance().GetWindAtPosition(mTM.GetTrans(), Environment::WIND_TYPE_SMOOTH | Environment::WIND_TYPE_GUSTY);
-    Vector3 basicLaunchVel = mTM.RowX() * ds.GetScaledVel(mAeroplaneSettings.mLaunchSpeed);
+    Vector3 basicLaunchVel = mTM.RowX() * ds.GetScaledVel(launchSpeed);
     Vector3 launchVel = windAtLaunchPos + basicLaunchVel;
 
     if (launchVel.Dot(mTM.RowX()) < 0.0f)
@@ -470,8 +512,15 @@ void Aeroplane::Terminate()
         mTugController = 0;
     }
 
-    mPhysics->Terminate();
+    if (!mGraphicsOnly)
+        mPhysics->Terminate();
     mGraphics->Terminate();
+
+    if (mGraphicsOnly)
+    {
+        // Nothing else was registered/allocated for a graphics-only ghost.
+        return;
+    }
 
     for (size_t i = 0 ; i != mSoundSettings.size() ; ++i)
     {
@@ -695,7 +744,8 @@ void Aeroplane::EntityUpdateLoopPrePhysics(float deltaTime)
             float dot = dirToBungee.Dot(mTM.RowX());
             if (dot > -0.0f)
             {
-                const float maxForce = mPhysics->GetMass() * mAeroplaneSettings.mMaxBungeeAcceleration;
+                const float bungeeTensionScale = PicaSim::GetInstance().GetSettings().mOptions.mBungeeTensionScale;
+                const float maxForce = mPhysics->GetMass() * mAeroplaneSettings.mMaxBungeeAcceleration * bungeeTensionScale;
                 float forceMag = (distToBungee / springLen) * maxForce;
                 Vector3 force = forceMag * dirToBungee;
 
@@ -857,10 +907,19 @@ Vector3 Aeroplane::GetCameraTargetPosition(
 }
 
 //======================================================================================================================
-void Aeroplane::SetTransform(const Transform& tm, const Vector3& vel, const Vector3& angVel) 
+void Aeroplane::SetTransform(const Transform& tm, const Vector3& vel, const Vector3& angVel)
 {
     mTM = tm;
     mVelocity = vel;
     mAngularVelocity = angVel;
     mPhysics->SetTransform(tm, vel, angVel);
+}
+
+//======================================================================================================================
+void Aeroplane::SetGraphicsTransform(const Transform& tm, const Vector3& vel, const Vector3& angVel)
+{
+    // Drives the cached object transform only - no physics (used by replay ghosts).
+    mTM = tm;
+    mVelocity = vel;
+    mAngularVelocity = angVel;
 }

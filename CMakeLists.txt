@@ -235,6 +235,8 @@ file(GLOB PICASIM_SOURCES CONFIGURE_DEPENDS source/PicaSim/*.cpp)
 file(GLOB PICASIM_HEADERS CONFIGURE_DEPENDS source/PicaSim/*.h)
 file(GLOB PICASIM_LANGUAGE_SOURCES CONFIGURE_DEPENDS source/PicaSim/Languages/*.cpp)
 file(GLOB PICASIM_MENU_SOURCES CONFIGURE_DEPENDS source/PicaSim/Menus/*.cpp)
+file(GLOB PICASIM_REPLAY_SOURCES CONFIGURE_DEPENDS source/PicaSim/Replay/*.cpp)
+file(GLOB PICASIM_REPLAY_HEADERS CONFIGURE_DEPENDS source/PicaSim/Replay/*.h)
 
 # --------------------------------------------------------------------------
 # Main executable
@@ -244,16 +246,20 @@ add_executable(PicaSim
     ${PICASIM_HEADERS}
     ${PICASIM_LANGUAGE_SOURCES}
     ${PICASIM_MENU_SOURCES}
+    ${PICASIM_REPLAY_SOURCES}
+    ${PICASIM_REPLAY_HEADERS}
 )
 
 target_include_directories(PicaSim PRIVATE
     source/PicaSim
     source/PicaSim/Menus
+    source/PicaSim/Replay
     source/PicaSim/Languages
     source/Framework
     source/Heightfield
     source/tinyxml
     source/Platform
+    source/thirdparty/cgltf
 )
 
 # Define SDL_MAIN_HANDLED so SDL doesn't redefine main to SDL_main

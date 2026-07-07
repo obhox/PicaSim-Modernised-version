@@ -8,6 +8,9 @@
 #include <cmath>
 #include <cstring>
 
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
 // Dear ImGui
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
@@ -1097,6 +1100,36 @@ void esSetLightAmbientColour(GLenum light, const GLVec4& ambientColour)
 void esSetLightSpecularColour(GLenum light, const GLVec4& specularColour)
 {
     esVector4Copy(gLightSpecularColour[light - GL_LIGHT0], specularColour);
+}
+
+//======================================================================================================================
+// Cascaded Shadow Map state + world-matrix recovery.
+CsmState gCsmState = { 0, 0, 4, 3, {{0}}, 0.0015f, 0.2f };
+
+// Inverse of the current camera view matrix (es GLMat44 storage). The es GLMat44
+// row-major bytes are bit-identical to a glm::mat4's column-major bytes for the
+// same rigid transform, so we can memcpy between them and use glm to invert.
+static GLMat44 gShadowViewInv;
+
+void esCaptureViewForShadows()
+{
+    GLMat44 view;
+    esGetMatrix(view, GL_MODELVIEW);
+    glm::mat4 g;
+    memcpy(&g[0][0], view, sizeof(GLMat44));
+    g = glm::inverse(g);
+    memcpy(gShadowViewInv, &g[0][0], sizeof(GLMat44));
+}
+
+void esSetWorldMatrix(int worldMatrixLoc)
+{
+    if (worldMatrixLoc < 0)
+        return;
+    // MODELVIEW = worldTM * view (es row-vector convention), so
+    // worldTM = MODELVIEW * inverse(view).
+    GLMat44 mv;    esGetMatrix(mv, GL_MODELVIEW);
+    GLMat44 world; esMatrixMultiply(world, mv, gShadowViewInv);
+    glUniformMatrix4fv(worldMatrixLoc, 1, GL_FALSE, (const GLfloat*)&world[0][0]);
 }
 
 //======================================================================================================================

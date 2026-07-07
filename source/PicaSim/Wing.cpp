@@ -252,6 +252,7 @@ void Wing::Init(
     }
 
     mControl = 0.0f;
+    mEffectiveness = 1.0f;
     mFlapAngle = 0.0f;
     mSlopAngle = 0.0f;
     mSlopAngleRate = 0.0f;
@@ -336,6 +337,8 @@ void Wing::UpdatePrePhysics(float deltaTime, const TurbulenceData& turbulenceDat
     aerofoilControl.mExtraCD = mCDPerDegree * 45.0f * (1.0f - FastCos(DegreesToRadians(getFlapAngle())));
     aerofoilControl.mExtraAngle = asinf(mFlapFraction * FastSin(DegreesToRadians(getFlapAngle())));
     aerofoilControl.mCDScale = mAeroplane->GetAeroplaneSettings().mDragScale;
+    // Crash damage: propagate this panel's effectiveness (1.0 unless broken off).
+    aerofoilControl.mEffectiveness = mEffectiveness;
 
     mLastWash = Vector3(0,0,0);
     mLastForce = Vector3(0,0,0);

@@ -19,6 +19,7 @@ class DebugRenderer;
 class Viewport;
 class HdrRenderTarget;
 class PostProcess;
+class ShadowManager;
 struct DisplayConfig;
 
 enum RenderLevels
@@ -150,6 +151,14 @@ public:
 
     const struct FrameworkSettings& GetFrameworkSettings() const {return mFrameworkSettings;}
 
+    /// Optional hook invoked once per RenderUpdate(), after all 3D + LDR overlays
+    /// and GxRender (HUD/text) objects have been drawn but BEFORE the buffer swap.
+    /// Used to draw an ImGui overlay (e.g. the in-flight telemetry window) on top
+    /// of the flight scene without introducing a Framework->PicaSim dependency.
+    /// Null by default, so leaving it unset is a no-op (no behaviour change).
+    typedef void (*PreSwapCallback)();
+    void SetPreSwapCallback(PreSwapCallback cb) {mPreSwapCallback = cb;}
+
 private:
     /// Key into RenderObjects is the "level", so smaller numbers get rendered first.
     typedef std::multimap<int, RenderObject*> RenderObjects;
@@ -164,6 +173,15 @@ private:
     void RenderFPS();
     void SetupLighting();
 
+    // Cascaded Shadow Map pass (only when mShadowMode == 2). Computes cascades
+    // from the given viewport's camera + mLightingDirection, renders the dynamic
+    // model casters into the shadow-map array, and publishes the result into
+    // gCsmState for the main pass. No-op (and clears gCsmState) otherwise.
+    void UpdateCSM(Viewport* primaryViewport, int screenWidth, int screenHeight);
+    // Caster iteration callback (renders all registered shadow-caster objects
+    // depth-only into the currently-bound cascade).
+    static void ShadowCasterCallback(void* user);
+
     // Lazily creates / resizes the HDR scene target and post-processor. Returns
     // false if the HDR path is unavailable (falls back to classic rendering).
     bool EnsureHdrResources(int width, int height);
@@ -176,6 +194,10 @@ private:
     PostProcess*     mPostProcess;
     int              mHdrWidth;
     int              mHdrHeight;
+
+    // Cascaded Shadow Map manager (null until first CSM frame; only used when
+    // FrameworkSettings::mShadowMode == 2).
+    ShadowManager*   mShadowManager;
 
     Viewports mViewports;
     Cameras mCameras;
@@ -195,6 +217,8 @@ private:
 
     bool    mEnableStereoscopy;
     float   mStereoSeparation;
+
+    PreSwapCallback mPreSwapCallback;
     bool    mUseMultiLights;
 
     FrameworkSettings& mFrameworkSettings;

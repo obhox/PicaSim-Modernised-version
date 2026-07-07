@@ -8,6 +8,7 @@
 #include "HeightfieldGenerator.h"
 
 #include "../Platform/S3ECompat.h"
+#include "../Platform/Platform.h"
 #include "Menus/PicaDialog.h"
 
 
@@ -22,6 +23,7 @@ Terrain::Terrain()
     mHeightfieldTerrainShape = 0;
     mHeightfieldRigidBody = 0;
     mDynamicsWorld = 0;
+    mNumLayerTextures = 0;
 }
 
 //======================================================================================================================
@@ -804,6 +806,32 @@ void Terrain::Init(btDynamicsWorld& dynamicsWorld, LoadingScreenHelper* loadingS
             mDetailTexture.Upload();
             TRACE_FILE_IF(1) TRACE("Uploaded texture %s id %d", ts.mBasicTexture.c_str(), mDetailTexture.mHWID);
         }
+
+        // Opt-in terrain splatting: load the layer albedos when a <TerrainLayers>
+        // block was present. Absent => mNumLayerTextures stays 0 and the legacy
+        // dual-texture terrain path (terrain.frag) runs unchanged.
+        mNumLayerTextures = 0;
+        int numLayers = (int) ts.mTerrainLayers.size();
+        if (numLayers > mMaxLayerTextures)
+            numLayers = mMaxLayerTextures;
+        for (int i = 0; i < numLayers; ++i)
+        {
+            Texture& tex = mLayerTextures[i];
+            LoadTextureFromFile(tex, ts.mTerrainLayers[i].mTexture.c_str());
+            tex.SetClamping(false);   // tiling
+            tex.SetFiltering(true);
+            tex.SetMipMapping(true);
+            tex.Upload();
+            if (tex.GetFlags() & Texture::UPLOADED_F)
+            {
+                glBindTexture(GL_TEXTURE_2D, tex.mHWID);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                tex.Upload();
+            }
+            TRACE_FILE_IF(1) TRACE("Uploaded terrain layer %d %s id %d", i, ts.mTerrainLayers[i].mTexture.c_str(), tex.mHWID);
+            ++mNumLayerTextures;
+        }
     }
 
     // Set up the plain
@@ -1052,7 +1080,13 @@ void Terrain::RenderUpdate(Viewport* viewport, int renderLevel)
         break;
     case RENDER_LEVEL_TERRAIN_SHADOW:
         {
-            if (gs.mOptions.mControlledPlaneShadows || gs.mOptions.mOtherShadows)
+            if (gCsmState.mEnabled)
+            {
+                // CSM mode: a single blended pass over the terrain instead of the
+                // per-caster blob decals.
+                RenderShadowCsm(viewport);
+            }
+            else if (gs.mOptions.mControlledPlaneShadows || gs.mOptions.mOtherShadows)
             {
                 size_t numShadowCasters = RenderManager::GetInstance().GetNumShadowCasterObjects();
                 for (size_t iShadowCaster = 0 ; iShadowCaster != numShadowCasters ; ++iShadowCaster)
@@ -1097,24 +1131,57 @@ void Terrain::RenderPlain(Viewport* viewport)
     }
     else
     {
-        // Set up the vertex buffer and shader program
-        GLuint shaderProgram = -1;
+        // Enhanced water is opt-in (mEnhancedWater); when off, the inner disc keeps
+        // using the legacy PlainShader so the default water is bit-for-bit unchanged.
+        // The outer fog ring always uses the legacy PlainShader.
+        const bool useWater = gs.mOptions.mFrameworkSettings.mEnhancedWater;
+        const PlainWaterShader* waterShader = (PlainWaterShader*) ShaderManager::GetInstance().GetShader(SHADER_PLAIN_WATER);
+
+        // Location aliases so the inner-disc code below is shader-agnostic (both
+        // shaders expose identically-named members).
+        int locPos, locCol, locMvp, locTexMat, locTex;
 
         {
-            plainShader->Use();
+            if (useWater)
+            {
+                waterShader->Use();
+                locPos = waterShader->a_position; locCol = waterShader->a_colour;
+                locMvp = waterShader->u_mvpMatrix; locTexMat = waterShader->u_textureMatrix; locTex = waterShader->u_texture;
+
+                // Extra water uniforms (sky/sun tint, camera, ripple time).
+                Vector3 cam = viewport->GetCamera()->GetPosition();
+                Vector3 lightDir = RenderManager::GetInstance().GetLightingDirection();
+                Vector3 amb = RenderManager::GetInstance().GetLightingAmbientColour();
+                Vector3 dif = RenderManager::GetInstance().GetLightingDiffuseColour();
+                // Cheap horizon/sky tint: ambient plus a small blue bias, clamped.
+                Vector3 sky(Minimum(amb.x * 1.5f + 0.10f, 1.0f),
+                            Minimum(amb.y * 1.5f + 0.15f, 1.0f),
+                            Minimum(amb.z * 1.5f + 0.25f, 1.0f));
+                glUniform3f(waterShader->u_cameraPos, cam.x, cam.y, cam.z);
+                glUniform3f(waterShader->u_lightDir, lightDir.x, lightDir.y, lightDir.z);
+                glUniform3f(waterShader->u_skyColour, sky.x, sky.y, sky.z);
+                glUniform3f(waterShader->u_sunColour, dif.x, dif.y, dif.z);
+                glUniform1f(waterShader->u_time, (float) Timer::GetSeconds());
+            }
+            else
+            {
+                plainShader->Use();
+                locPos = plainShader->a_position; locCol = plainShader->a_colour;
+                locMvp = plainShader->u_mvpMatrix; locTexMat = plainShader->u_textureMatrix; locTex = plainShader->u_texture;
+            }
 
             gStreamVBO.Bind();
             gStreamVBO.Reserve(sizeof(mPlainPts) + sizeof(mPlainCols));
             size_t posOffset = gStreamVBO.Upload(&mPlainPts[0], sizeof(mPlainPts));
             size_t colOffset = gStreamVBO.Upload(&mPlainCols[0], sizeof(mPlainCols));
 
-            glVertexAttribPointer(plainShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
-            glEnableVertexAttribArray(plainShader->a_position);
+            glVertexAttribPointer(locPos, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
+            glEnableVertexAttribArray(locPos);
 
-            glVertexAttribPointer(plainShader->a_colour, 4, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)colOffset);
-            glEnableVertexAttribArray(plainShader->a_colour);
+            glVertexAttribPointer(locCol, 4, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)colOffset);
+            glEnableVertexAttribArray(locCol);
 
-            esSetModelViewProjectionMatrix(plainShader->u_mvpMatrix);
+            esSetModelViewProjectionMatrix(locMvp);
         }
 
         const float scaleX = es.mTerrainSettings.mPlainDetailTextureScaleX;
@@ -1126,11 +1193,8 @@ void Terrain::RenderPlain(Viewport* viewport)
             float heightfieldRange = mHeightfield->getRange();
 
             glActiveTexture(GL_TEXTURE0);
-            int textureMatrixLoc = -1;
-            {
-                textureMatrixLoc = plainShader->u_textureMatrix;
-                glUniform1i(plainShader->u_texture, 0);
-            }
+            int textureMatrixLoc = locTexMat;
+            glUniform1i(locTex, 0);
 
             glBindTexture(GL_TEXTURE_2D, mDetailTexture.mHWID);
 
@@ -1152,7 +1216,13 @@ void Terrain::RenderPlain(Viewport* viewport)
         }
 
 #if 1
-        // Outer plain
+        // Outer plain (always the legacy PlainShader). Rebind it if the inner disc
+        // used the water shader.
+        if (useWater)
+        {
+            plainShader->Use();
+            esSetModelViewProjectionMatrix(plainShader->u_mvpMatrix);
+        }
         EnableBlend enableBlend;
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         {
@@ -1310,6 +1380,12 @@ void Terrain::RenderHeightfield(Viewport* viewport)
     // Set up the vertex buffer and shader program
     const TerrainPanoramaShader* terrainPanoramaShader = (TerrainPanoramaShader*) ShaderManager::GetInstance().GetShader(SHADER_TERRAIN_PANORAMA);
     const TerrainShader* terrainShader = (TerrainShader*) ShaderManager::GetInstance().GetShader(SHADER_TERRAIN);
+    const TerrainSplatShader* terrainSplatShader = (TerrainSplatShader*) ShaderManager::GetInstance().GetShader(SHADER_TERRAIN_SPLAT);
+
+    // Opt-in terrain splatting: only for real heightfield terrains (never the
+    // depth-only photo panorama) and only when <TerrainLayers> supplied textures.
+    const bool useSplat = (es.mTerrainSettings.mType != TerrainSettings::TYPE_PANORAMA) && (mNumLayerTextures > 0);
+
     int textureMatrix0Loc = -1;
     int textureMatrix1Loc = -1;
     int texture0Loc = -1;
@@ -1331,6 +1407,13 @@ void Terrain::RenderHeightfield(Viewport* viewport)
             glEnableVertexAttribArray(terrainPanoramaShader->a_position);
             esSetModelViewProjectionMatrix(terrainPanoramaShader->u_mvpMatrix);
         }
+        else if (useSplat)
+        {
+            terrainSplatShader->Use();
+            glVertexAttribPointer(terrainSplatShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) start);
+            glEnableVertexAttribArray(terrainSplatShader->a_position);
+            esSetModelViewProjectionMatrix(terrainSplatShader->u_mvpMatrix);
+        }
         else
         {
             textureMatrix0Loc = terrainShader->u_textureMatrix0;
@@ -1350,6 +1433,72 @@ void Terrain::RenderHeightfield(Viewport* viewport)
         TRACE_FILE_IF(4) TRACE("Terrain::RenderHeightfield: num verts = %d", num);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, num);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    }
+    else if (useSplat)
+    {
+        const TerrainSettings& tsplat = es.mTerrainSettings;
+
+        // Lightmap (pre-lit basic texture) on unit 0, mapped by world x/y over the
+        // terrain extent - exactly the texture0 mapping the legacy path uses. The
+        // splat shader reuses its luminance as the light/AO term so shading and
+        // the CSM shadow-receiver decal stay consistent.
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1i(terrainSplatShader->u_lightmap, 0);
+        glBindTexture(GL_TEXTURE_2D, mHeightfieldTexture.mHWID);
+
+        float xMin = mHeightfield->sw().x;
+        float xMax = mHeightfield->se().x;
+        float yMin = mHeightfield->sw().y;
+        float yMax = mHeightfield->nw().y;
+        esMatrixMode(GL_TEXTURE);
+        esPushMatrix();
+        esLoadIdentity();
+        esScalef(1.0f / (xMax - xMin), 1.0f / (yMax - yMin), 1.0f);
+        esTranslatef(-xMin, -yMin, 0.0f);
+        esSetTextureMatrix(terrainSplatShader->u_textureMatrix0);
+        esMatrixMode(GL_MODELVIEW);
+
+        // Layer albedos on units 1..4. Bind all four units to a valid texture
+        // (extras reuse layer 0) so no sampler is left unbound on the core profile.
+        int samplerUnits[TerrainSplatShader::MAX_LAYERS] = {1, 2, 3, 4};
+        for (int i = 0; i < TerrainSplatShader::MAX_LAYERS; ++i)
+        {
+            glActiveTexture(GL_TEXTURE0 + samplerUnits[i]);
+            int src = (i < mNumLayerTextures) ? i : 0;
+            glBindTexture(GL_TEXTURE_2D, mLayerTextures[src].mHWID);
+        }
+        glUniform1iv(terrainSplatShader->u_layerTex, TerrainSplatShader::MAX_LAYERS, samplerUnits);
+
+        float heights[TerrainSplatShader::MAX_LAYERS * 2];
+        float slopes [TerrainSplatShader::MAX_LAYERS * 2];
+        float scales [TerrainSplatShader::MAX_LAYERS];
+        for (int i = 0; i < mNumLayerTextures; ++i)
+        {
+            const TerrainSettings::TerrainLayer& L = tsplat.mTerrainLayers[i];
+            heights[i * 2 + 0] = L.mHeightMin;
+            heights[i * 2 + 1] = L.mHeightMax;
+            slopes [i * 2 + 0] = L.mSlopeMin;
+            slopes [i * 2 + 1] = L.mSlopeMax;
+            scales [i]         = L.mScale;
+        }
+        glUniform1i (terrainSplatShader->u_numLayers, mNumLayerTextures);
+        glUniform2fv(terrainSplatShader->u_layerHeight, mNumLayerTextures, heights);
+        glUniform2fv(terrainSplatShader->u_layerSlope,  mNumLayerTextures, slopes);
+        glUniform1fv(terrainSplatShader->u_layerScale,  mNumLayerTextures, scales);
+
+        glUniform3f(terrainSplatShader->u_cameraPos, cameraPosition.x, cameraPosition.y, cameraPosition.z);
+        glUniform1f(terrainSplatShader->u_shadeGain, 1.9f);          // TUNING: albedo*luma brightness
+        float range = mHeightfield->getRange();
+        glUniform1f(terrainSplatShader->u_detailFadeStart, range * 0.12f);  // TUNING: detail fade in
+        glUniform1f(terrainSplatShader->u_detailFadeEnd,   range * 0.60f);  // TUNING: revert to baked look
+
+        TRACE_FILE_IF(3) TRACE("Terrain::RenderHeightfield (splat): num verts = %d", num);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, num);
+
+        esMatrixMode(GL_TEXTURE);
+        esPopMatrix();
+        esMatrixMode(GL_MODELVIEW);
+        glActiveTexture(GL_TEXTURE0);
     }
     else
     {
@@ -1507,11 +1656,69 @@ void Terrain::RenderHeightfield(Viewport* viewport)
     {
         if (es.mTerrainSettings.mType == TerrainSettings::TYPE_PANORAMA)
             glDisableVertexAttribArray(terrainPanoramaShader->a_position);
+        else if (useSplat)
+            glDisableVertexAttribArray(terrainSplatShader->a_position);
         else
             glDisableVertexAttribArray(terrainShader->a_position);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
     TRACE_FILE_IF(2) TRACE("Finished RenderHeightfield");
+}
+
+//======================================================================================================================
+void Terrain::RenderShadowCsm(Viewport* viewport)
+{
+    TRACE_METHOD_ONLY(2);
+    if (!mHeightfield || !gCsmState.mEnabled)
+        return;
+
+    // Reuse the mesh generated by RenderHeightfield (RENDER_LEVEL_TERRAIN, which
+    // runs before this pass). The heightfield vertices are already in world space.
+    const Heightfield::HeightfieldRuntime::SavedPoints& savedPoints = mHeightfield->getSavedPoints();
+    unsigned num = savedPoints.size();
+    if (num == 0)
+        return;
+
+    const TerrainShadowCsmShader* shader =
+        (const TerrainShadowCsmShader*) ShaderManager::GetInstance().GetShader(SHADER_TERRAIN_SHADOW_CSM);
+    shader->Use();
+
+    gStreamVBO.Bind();
+    size_t start = gStreamVBO.Upload(&savedPoints[0], sizeof(Heightfield::HeightfieldRuntime::Pos) * num);
+    glVertexAttribPointer(shader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*)start);
+    glEnableVertexAttribArray(shader->a_position);
+    esSetModelViewProjectionMatrix(shader->u_mvpMatrix);
+
+    // CSM uniforms.
+    if (shader->u_csmEnabled >= 0) glUniform1f(shader->u_csmEnabled, 1.0f);
+    if (shader->u_shadowMap >= 0)
+    {
+        glActiveTexture(GL_TEXTURE0 + gCsmState.mShadowUnit);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, gCsmState.mShadowTexArray);
+        glUniform1i(shader->u_shadowMap, gCsmState.mShadowUnit);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    if (shader->u_cascadeViewProj >= 0)
+        glUniformMatrix4fv(shader->u_cascadeViewProj, gCsmState.mNumCascades, GL_FALSE, &gCsmState.mCascadeViewProj[0][0]);
+    if (shader->u_csmBias >= 0)      glUniform1f(shader->u_csmBias, gCsmState.mBias);
+    if (shader->u_shadowStrength >= 0) glUniform1f(shader->u_shadowStrength, gCsmState.mShadowStrength);
+
+    // Blended darkening over the terrain surface. Depth-tested (LEQUAL so it lands
+    // exactly on the already-drawn terrain, and is occluded by nearer geometry
+    // like the aircraft), but does not write depth.
+    FrontFaceCW frontFaceCW;
+    EnableCullFace enableCullFace(GL_BACK);
+    EnableBlend enableBlend;
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    DisableDepthMask disableDepthMask;
+    glDepthFunc(GL_LEQUAL);
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, num);
+
+    glDepthFunc(GL_LESS);
+    glDisableVertexAttribArray(shader->a_position);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glUseProgram(0);
 }
 
 //======================================================================================================================

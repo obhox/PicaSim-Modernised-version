@@ -159,6 +159,7 @@ static bool InitialiseOptions(GameSettings& gameSettings)
 // golden-image screenshots of flight scenes are repeatable. Combined with
 // --screenshot-after N this gives deterministic per-scene captures.
 static bool        gCaptureFly = false;
+static bool        gCrashTest = false; // --crashtest: enable damage + dive into terrain
 static std::string gCaptureAeroplane;
 static std::string gCaptureEnvironment;
 
@@ -226,6 +227,31 @@ int main(int argc, char* argv[])
                     gCaptureAeroplane = argv[++i];
                 if (i + 1 < argc && argv[i + 1][0] != '-')
                     gCaptureEnvironment = argv[++i];
+            }
+            // --ghost/--replay <file.psrp>: when the scene loads, spawn a translucent
+            // replay ghost from the given .psrp file (drawn with the loaded plane).
+            // Combine with --fly + --screenshot-after for a single-run capture.
+            else if ((strcmp(argv[i], "--ghost") == 0 || strcmp(argv[i], "--replay") == 0) && i + 1 < argc)
+            {
+                PicaSim::SetBootGhostFile(argv[++i]);
+            }
+            // --crashtest: like --fly, but forces crash damage on and dives the
+            // aircraft into the terrain so a break-off + debris is guaranteed.
+            else if (strcmp(argv[i], "--crashtest") == 0)
+            {
+                gCaptureFly = true;
+                gCrashTest = true;
+                if (i + 1 < argc && argv[i + 1][0] != '-')
+                    gCaptureAeroplane = argv[++i];
+                if (i + 1 < argc && argv[i + 1][0] != '-')
+                    gCaptureEnvironment = argv[++i];
+            }
+            // --telemetry: force the in-flight telemetry ImGui window on for this
+            // run (mirrors the mShowTelemetry setting), so a single --fly capture
+            // shows it without editing settings.xml.
+            else if (strcmp(argv[i], "--telemetry") == 0)
+            {
+                PicaSim::SetForceTelemetry(true);
             }
         }
         if (screenshotFrame > 0)
@@ -330,6 +356,10 @@ int main(int argc, char* argv[])
         std::string userSettingsFile = userSettingsBase + "settings.xml";
         gameSettings.LoadFromFile(userSettingsFile, false);
 
+        // Auto-detect a game controller / R/C transmitter connected at startup and
+        // load a matching preset (unless the user turned auto-configure off).
+        AutoConfigureController(gameSettings);
+
         if (gameSettings.mStatistics.mPicaSimBuildNumber < GetBuildNumber() && gameSettings.mStatistics.mPicaSimBuildNumber != 0)
         {
             DisplayWhatsNewMenu(gameSettings);
@@ -418,6 +448,10 @@ int main(int argc, char* argv[])
                 gameSettings.mChallengeSettings = ChallengeSettings();
 
                 gameSettings.mOptions.mFrameworkSettings.UpdateScreenDimensions();
+
+                // Pick up a controller / transmitter that was hot-plugged while at
+                // the menus (no-op once the current device is already configured).
+                AutoConfigureController(gameSettings);
 
                 if (CheckForQuitRequest())
                     break;
@@ -533,6 +567,19 @@ SelectPlane:
 
                 doDefaultFreeFly = false;
 
+                // --crashtest dev hook: force crash damage on and launch the plane
+                // in a fast nose-down dive so it slams into the terrain within a
+                // fraction of a second, shedding a wing panel. Combine with
+                // --screenshot-after N (e.g. 120) to catch the debris in one run.
+                // Applied here (after options have been loaded) so it is not
+                // overwritten by settings.xml.
+                if (gCrashTest)
+                {
+                    gameSettings.mOptions.mFrameworkSettings.mCrashDamage = true;
+                    gameSettings.mOptions.mLaunchAngleUpDelta = -85.0f; // point nearly straight down
+                    gameSettings.mOptions.mLaunchSpeedScale = 4.0f;     // dive hard into the ground
+                }
+
                 {
                     TRACE_FILE_IF(1) TRACE("Setting up loading screen");
                     LoadingScreen loadingScreen(TXT(PS_LOADING), gameSettings, true, true, true);
@@ -556,6 +603,14 @@ SelectPlane:
                     gameSettings.mOptions.mFrameworkSettings.UpdateScreenDimensions();
 
                     PollEvents();
+
+                    // In --fly capture mode there's no user input to "tap to fly",
+                    // so force the sim out of its initial paused state each frame -
+                    // otherwise the aeroplane sits frozen at its launch pose (and
+                    // e.g. the flight recorder never sees a non-zero dt).
+                    if (gCaptureFly)
+                        PicaSim::GetInstance().SetStatus(PicaSim::STATUS_FLYING);
+
                     int64 currentTimeMs = Timer::GetMilliseconds();
 
 #ifdef PICASIM_VR_SUPPORT

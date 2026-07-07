@@ -25,11 +25,22 @@ public:
     Aeroplane(Controller& controller);
     ~Aeroplane();
 
-    /// If basicLaunchPos is zero then the aeroplane will not be moved
-    void Init(const AeroplaneSettings& as, 
-                        const Vector3* basicLaunchPos, 
-                        class LoadingScreenHelper* loadingScreen);
+    /// If basicLaunchPos is zero then the aeroplane will not be moved.
+    /// If graphicsOnly is true then no physics/audio/tug are created - the plane
+    /// is a pure graphical representation (e.g. a replay "ghost") whose transform
+    /// is driven externally each frame via SetGraphicsTransform().
+    void Init(const AeroplaneSettings& as,
+                        const Vector3* basicLaunchPos,
+                        class LoadingScreenHelper* loadingScreen,
+                        bool graphicsOnly = false);
     void Terminate();
+
+    /// True if this aeroplane was created graphics-only (no physics).
+    bool IsGraphicsOnly() const {return mGraphicsOnly;}
+
+    /// Sets the object transform (and cached velocities) WITHOUT touching physics.
+    /// Used to drive a graphics-only "ghost" from an interpolated replay each frame.
+    void SetGraphicsTransform(const Transform& tm, const Vector3& vel, const Vector3& angVel);
 
     void EntityUpdate(float deltaTime, int entityLevel) OVERRIDE;
 
@@ -109,6 +120,8 @@ private:
     float GetHeightForNoGroundPenetration(const Vector3& launchPos) const;
 
     AeroplaneSettings  mAeroplaneSettings;
+
+    bool mGraphicsOnly;
 
     AeroplaneGraphics* mGraphics;
     AeroplanePhysics*  mPhysics;
