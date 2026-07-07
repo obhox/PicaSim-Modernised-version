@@ -1,4 +1,5 @@
 #include "DebugRenderer.h"
+#include <cstddef>
 #include "RenderManager.h"
 #include "Trace.h"
 #include "Graphics.h"
@@ -97,11 +98,6 @@ void DebugRenderer::RenderOverlayUpdate(int renderLevel, DisplayConfig& displayC
 
     // Graphs
     {
-        if (gGLVersion == 1)
-        {
-            glEnableClientState(GL_VERTEX_ARRAY);
-        }
-        else
         {
             controllerShader->Use();
             glEnableVertexAttribArray(controllerShader->a_position);
@@ -114,15 +110,12 @@ void DebugRenderer::RenderOverlayUpdate(int renderLevel, DisplayConfig& displayC
             if (graph.mGraphPoints.empty())
                 continue;
 
-            if (gGLVersion == 1)
-            {
-                glColor4f(graph.mColour.x,graph.mColour.y,graph.mColour.z,1.0f);
-                glVertexPointer(2, GL_FLOAT, 0, &graph.mGraphPoints[0].mX);
-            }
-            else
             {
                 glUniform4f(controllerShader->u_colour, graph.mColour.x, graph.mColour.y, graph.mColour.z, 1.0f);
-                glVertexAttribPointer(controllerShader->a_position, 2, GL_FLOAT, GL_FALSE, 0, &graph.mGraphPoints[0].mX);
+                gStreamVBO.Bind();
+                size_t off = gStreamVBO.Upload(&graph.mGraphPoints[0].mX,
+                                               graph.mGraphPoints.size() * sizeof(graph.mGraphPoints[0]));
+                glVertexAttribPointer(controllerShader->a_position, 2, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)off);
             }
             glDrawArrays(GL_LINE_STRIP, 0, graph.mGraphPoints.size());
         }
@@ -131,43 +124,32 @@ void DebugRenderer::RenderOverlayUpdate(int renderLevel, DisplayConfig& displayC
     // General 2D lines
     if (!mLinePoints2D.empty())
     {
-        if (gGLVersion == 1)
-        {
-            glEnableClientState(GL_VERTEX_ARRAY);
-            glEnableClientState(GL_COLOR_ARRAY);
-        }
-        else
         {
             simpleShader->Use();
         }
 
         esSetModelViewProjectionMatrix(simpleShader->u_mvpMatrix);
 
-        if (gGLVersion == 1)
         {
-            glVertexPointer(2, GL_FLOAT, sizeof(LinePoint2D), &mLinePoints2D[0].mPos);
-            glColorPointer(4, GL_FLOAT, sizeof(LinePoint2D), &mLinePoints2D[0].mColour);
-        }
-        else
-        {
-            glVertexAttribPointer(simpleShader->a_position, 2, GL_FLOAT, GL_FALSE, sizeof(LinePoint2D), &mLinePoints2D[0].mPos);
-            glVertexAttribPointer(simpleShader->a_colour, 2, GL_FLOAT, GL_FALSE, sizeof(LinePoint2D), &mLinePoints2D[0].mColour);
+            // Interleaved vertices: upload the whole array, then offset each
+            // attribute by its member offset within the (unchanged) stride.
+            gStreamVBO.Bind();
+            size_t base = gStreamVBO.Upload(&mLinePoints2D[0], mLinePoints2D.size() * sizeof(LinePoint2D));
+            glVertexAttribPointer(simpleShader->a_position, 2, GL_FLOAT, GL_FALSE, sizeof(LinePoint2D),
+                                  (const GLvoid*)(base + offsetof(LinePoint2D, mPos)));
+            glVertexAttribPointer(simpleShader->a_colour, 2, GL_FLOAT, GL_FALSE, sizeof(LinePoint2D),
+                                  (const GLvoid*)(base + offsetof(LinePoint2D, mColour)));
         }
         glDrawArrays(GL_LINES, 0, mLinePoints2D.size());
         mLinePoints2D.clear();
     }
 
     esPopMatrix();
-    if (gGLVersion == 1)
-    {
-        glDisableClientState(GL_VERTEX_ARRAY);
-        glDisableClientState(GL_COLOR_ARRAY);
-    }
-    else
     {
         glDisableVertexAttribArray(controllerShader->a_position);
         glDisableVertexAttribArray(simpleShader->a_position);
         glDisableVertexAttribArray(simpleShader->a_colour);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 }
 
@@ -177,16 +159,13 @@ void DebugRenderer::RenderUpdate(class Viewport* viewport, int renderLevel)
     TRACE_METHOD_ONLY(2);
     const SimpleShader* simpleShader = (SimpleShader*) ShaderManager::GetInstance().GetShader(SHADER_SIMPLE);
 
-    if (gGLVersion == 1)
-    {
-        glEnableClientState(GL_VERTEX_ARRAY);
-        glVertexPointer(3, GL_FLOAT, 0, pts);
-    }
-    else
     {
         simpleShader->Use();
 
-        glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, pts);
+        // Upload the cross geometry once; the points loop below reuses it.
+        gStreamVBO.Bind();
+        size_t off = gStreamVBO.Upload(pts, sizeof(pts));
+        glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)off);
         glEnableVertexAttribArray(simpleShader->a_position);
 
         glDisableVertexAttribArray(simpleShader->a_colour);
@@ -201,10 +180,7 @@ void DebugRenderer::RenderUpdate(class Viewport* viewport, int renderLevel)
         ConvertTransformToGLMat44(point.mTM, glTM);
         esMultMatrixf(&glTM[0][0]);
         esScalef(point.mSize, point.mSize, point.mSize);
-        if (gGLVersion == 1)
-            glColor4f(point.mColour.x,point.mColour.y,point.mColour.z,1);
-        else
-            glVertexAttrib3fv(simpleShader->a_colour, &point.mColour.x);
+        glVertexAttrib3fv(simpleShader->a_colour, &point.mColour.x);
         esSetModelViewProjectionMatrix(simpleShader->u_mvpMatrix);
         glDrawArrays(GL_LINES, 0, 6);
         esPopMatrix();
@@ -223,24 +199,20 @@ void DebugRenderer::RenderUpdate(class Viewport* viewport, int renderLevel)
         linePts[4] = line.mEnd.y;
         linePts[5] = line.mEnd.z;
 
-        if (gGLVersion == 1)
         {
-            glVertexPointer(3, GL_FLOAT, 0, linePts);
-            glColor4f(line.mColour.x,line.mColour.y,line.mColour.z,1);
-        }
-        else
-        {
-            glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, linePts);
+            gStreamVBO.Bind();
+            size_t off = gStreamVBO.Upload(linePts, sizeof(linePts));
+            glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)off);
             glVertexAttrib3fv(simpleShader->a_colour, &line.mColour.x);
         }
         glDrawArrays(GL_LINES, 0, 2);
     }
     mLines.clear();
 
-    if (gGLVersion == 1)
-        glDisableClientState(GL_VERTEX_ARRAY);
-    else
+    {
         glDisableVertexAttribArray(simpleShader->a_position);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
 }
 
 //======================================================================================================================

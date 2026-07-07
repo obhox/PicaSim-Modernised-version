@@ -95,13 +95,6 @@ void BoxObject::RenderUpdate(class Viewport* viewport, int renderLevel)
 
     EnableCullFace enableCullFace(GL_BACK);
 
-    if (gGLVersion == 1 && mVisible) 
-    {
-        glEnable(GL_NORMALIZE);
-        if (renderLevel != RENDER_LEVEL_TERRAIN_SHADOW)
-            glEnable(GL_LIGHTING);
-    }
-
     if (!mVisible)
     {
         glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
@@ -109,22 +102,6 @@ void BoxObject::RenderUpdate(class Viewport* viewport, int renderLevel)
 
     const Options& options = PicaSim::GetInstance().GetSettings().mOptions;
     const ModelShader* modelShader = (ModelShader*) ShaderManager::GetInstance().GetShader(SHADER_MODEL);
-    if (gGLVersion == 1)
-    {
-        if (renderLevel != RENDER_LEVEL_TERRAIN_SHADOW)
-        {
-            float spec = 0.5f;
-            GLfloat mat[] = {spec, spec, spec, 1.0f};
-            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, mat);
-            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 100.0f); // smooth surface = large numbers = small highlights
-
-            // Overwrites the actual material for ambient and diffuse, front and back
-            glEnable(GL_COLOR_MATERIAL);
-        }
-
-        glEnableClientState(GL_VERTEX_ARRAY);
-    }
-    else
     {
         modelShader->Use();
         glUniform1f(modelShader->u_specularExponent, 100.0f);
@@ -157,32 +134,16 @@ void BoxObject::RenderUpdate(class Viewport* viewport, int renderLevel)
 
     esScalef(mExtents.x, mExtents.y, mExtents.z);
 
-    if (gGLVersion == 1)
     {
-        glVertexPointer(3, GL_FLOAT, 0, boxPoints);
-        glNormal3f(0, 0, mExtents.z);
-    }
-    else
-    {
-        glVertexAttribPointer(modelShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) boxPoints);
+        // Upload the box quad once; the six face draws below reuse it.
+        gStreamVBO.Bind();
+        size_t posOffset = gStreamVBO.Upload(boxPoints, sizeof(boxPoints));
+        glVertexAttribPointer(modelShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
         glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.z);
     }
 
 
     // draw the top and then round the sides
-    if (gGLVersion == 1)
-    {
-        if (renderLevel == RENDER_LEVEL_TERRAIN_SHADOW)
-        {
-            float c = ClampToRange(1.0f - mShadowAmount, 0.0f, 1.0f);
-            glColor4f(c, c, c, 1.0f);
-        }
-        else
-        {
-            glColor4f(mColour.x, mColour.y, mColour.z, 1.0f);
-        }
-    }
-    else
     {
         if (renderLevel == RENDER_LEVEL_TERRAIN_SHADOW)
         {
@@ -198,66 +159,43 @@ void BoxObject::RenderUpdate(class Viewport* viewport, int renderLevel)
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
     // Sides
-    if (gGLVersion == 1)
-        glNormal3f(0, 0, mExtents.y);
-    else
-        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.y);
+    glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.y);
 
     ROTATE_90_X;
     esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-    if (gGLVersion == 1)
-        glNormal3f(0, 0, mExtents.x);
-    else
-        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.x);
+    glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.x);
 
     ROTATE_90_Y;
     esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-    if (gGLVersion == 1)
-        glNormal3f(0, 0, mExtents.y);
-    else
-        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.y);
+    glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.y);
 
     ROTATE_90_Y;
     esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-    if (gGLVersion == 1)
-        glNormal3f(0, 0, mExtents.x);
-    else
-        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.x);
+    glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.x);
 
     ROTATE_90_Y;
     esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-    if (gGLVersion == 1)
-        glNormal3f(0, 0, mExtents.z);
-    else
-        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.z);
+    glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/mExtents.z);
 
     ROTATE_90_X;
     esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-    if (gGLVersion == 1)
     {
-        glDisable(GL_COLOR_MATERIAL);
-        glDisableClientState(GL_VERTEX_ARRAY);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
     if (mWireframe)
     {
         RenderManager::GetInstance().GetDebugRenderer().DrawBox(mTM, mExtents);
-    }
-
-    if (gGLVersion == 1) 
-    {
-        glDisable(GL_NORMALIZE);
-        glDisable(GL_LIGHTING);
     }
 
     if (!mVisible)

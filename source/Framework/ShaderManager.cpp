@@ -2,6 +2,7 @@
 #include "ShaderManager.h"
 #include "LoadingScreenHelper.h"
 #include "Trace.h"
+#include "../Platform/Platform.h"
 
 //======================================================================================================================
 ShaderManager* ShaderManager::mInstance = 0;
@@ -15,12 +16,9 @@ ShaderManager& ShaderManager::GetInstance()
 //======================================================================================================================
 ShaderManager::ShaderManager(LoadingScreenHelper* loadingScreen)
 {
-    int maxVertexUniforms, maxVertexAttribs, maxVaryingVectors, maxFragmentUniformVectors;
-    glGetIntegerv(GL_MAX_VERTEX_UNIFORM_VECTORS, &maxVertexUniforms);
-    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &maxVertexAttribs);
-    glGetIntegerv(GL_MAX_VARYING_VECTORS, &maxVaryingVectors);
-    glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_VECTORS, &maxFragmentUniformVectors);
-
+    // (Previously queried GL_MAX_*_VECTORS limits here for diagnostics; those
+    // enums are ES-only and are GL_INVALID_ENUM on a desktop core profile, and
+    // the values were unused - removed.)
     mShaders[SHADER_SIMPLE]                        = new SimpleShader();
     mShaders[SHADER_CONTROLLER]                    = new ControllerShader();
     mShaders[SHADER_SKYBOX]                        = new SkyboxShader();
@@ -34,15 +32,12 @@ ShaderManager::ShaderManager(LoadingScreenHelper* loadingScreen)
     mShaders[SHADER_SHADOW]                        = new ShadowShader();
     mShaders[SHADER_SMOKE]                         = new SmokeShader();
 
-    if (gGLVersion > 1)
+    if (loadingScreen)
+        loadingScreen->Update("Compiling shaders");
+    for (int i = 0 ; i != NUM_SHADERS ; ++i)
     {
-        if (loadingScreen)
-            loadingScreen->Update("Compiling shaders");
-        for (int i = 0 ; i != NUM_SHADERS ; ++i)
-        {
-            mShaders[i]->Init();
-            IwAssert(ROWLHOUSE, mShaders[i]->mShaderProgram > 0);
-        }
+        mShaders[i]->Init();
+        IwAssert(ROWLHOUSE, mShaders[i]->mShaderProgram > 0);
     }
 }
 
@@ -74,5 +69,28 @@ void ShaderManager::Terminate()
 const Shader* ShaderManager::GetShader(ShaderType type)
 {
     return mShaders[type];
+}
+
+//======================================================================================================================
+void ShaderManager::PollHotReload()
+{
+#ifndef NDEBUG
+    if (!mInstance)
+        return;
+
+    // Throttle the file-system stat() sweep to a few times per second - it runs
+    // every frame otherwise.
+    static uint64_t sLastCheckMs = 0;
+    uint64_t nowMs = Timer::GetMilliseconds();
+    if (nowMs - sLastCheckMs < 300)
+        return;
+    sLastCheckMs = nowMs;
+
+    for (int i = 0; i < NUM_SHADERS; ++i)
+    {
+        if (mInstance->mShaders[i]->NeedsReload())
+            mInstance->mShaders[i]->Reload();
+    }
+#endif
 }
 

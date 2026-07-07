@@ -95,7 +95,7 @@ public:
 
     struct Component
     {
-        Component(const std::string& name) : mVertexBuffer(0), mName(name), mTM(Transform::g_Identity), mTexture(0), mAlphaScale(1.0f) {}
+        Component(const std::string& name) : mVertexBuffer(0), mName(name), mTM(Transform::g_Identity), mTexture(0), mAlphaScale(1.0f), mRoughness(0.6f), mMetallic(0.0f) {}
         std::string        mName;
         std::string        mTextureName;
         UntexturedVertices mUntexturedVertices;
@@ -104,6 +104,10 @@ public:
         GLuint             mVertexBuffer;
         Texture*           mTexture;
         float              mAlphaScale;
+        // PBR-lite per-component material (derived from AC3D shininess, optionally
+        // overridden by <model dir>/Materials.xml). metallic defaults to 0.
+        float              mRoughness;
+        float              mMetallic;
     };
     typedef std::vector<Component> Components;
 

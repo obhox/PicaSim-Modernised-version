@@ -30,18 +30,13 @@ void Rope::RenderUpdate(class Viewport* viewport, int renderLevel)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     const SimpleShader* simpleShader = (SimpleShader*) ShaderManager::GetInstance().GetShader(SHADER_SIMPLE);
 
-    if (gGLVersion == 1)
-    {
-        glEnableClientState(GL_VERTEX_ARRAY);
-        glVertexPointer(3, GL_FLOAT, 0, &mPoints[0].x);
-        glColor4f(mColour.x, mColour.y, mColour.z, mColour.w);
-    }
-    else
     {
         simpleShader->Use();
 
         // Get the variable locations
-        glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, &mPoints[0].x);
+        gStreamVBO.Bind();
+        size_t posOffset = gStreamVBO.Upload(&mPoints[0].x, numPoints * sizeof(Vector3));
+        glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
         glEnableVertexAttribArray(simpleShader->a_position);
 
         glVertexAttrib4fv(simpleShader->a_colour, &mColour.x);
@@ -51,10 +46,10 @@ void Rope::RenderUpdate(class Viewport* viewport, int renderLevel)
     esSetModelViewProjectionMatrix(simpleShader->u_mvpMatrix);
     glDrawArrays(GL_LINE_STRIP, 0, numPoints);
 
-    if (gGLVersion == 1)
-        glDisableClientState(GL_VERTEX_ARRAY);
-    else
+    {
         glDisableVertexAttribArray(simpleShader->a_position);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
 
 }
 

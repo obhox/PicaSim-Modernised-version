@@ -192,14 +192,6 @@ void Skybox::RenderUpdate(class Viewport* viewport, int renderLevel)
     DisableFog disableFog;
 
     const SkyboxShader* skyboxShader = (SkyboxShader*) ShaderManager::GetInstance().GetShader(SHADER_SKYBOX);
-    if (gGLVersion == 1)
-    {
-        glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-        glEnable(GL_TEXTURE_2D);
-        glEnableClientState(GL_VERTEX_ARRAY);
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-    }
-    else
     {
         skyboxShader->Use();
         glUniform1i(skyboxShader->u_texture, 0);
@@ -212,18 +204,19 @@ void Skybox::RenderUpdate(class Viewport* viewport, int renderLevel)
       
     glActiveTexture(GL_TEXTURE0);
 
-    if (gGLVersion == 1)
     {
-        glVertexPointer(3, GL_FLOAT, 0, pts);
-        glTexCoordPointer(2, GL_FLOAT, 0, uvs);
-    }
-    else
-    {
-        // Load the vertex position
-        glVertexAttribPointer(skyboxShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, pts);
+        // Upload the quad's positions + texcoords into the shared streaming VBO
+        // and point the attributes at byte offsets (core profile has no
+        // client-side arrays). The 6 DrawSide() calls below reuse these.
+        gStreamVBO.Bind();
+        gStreamVBO.Reserve(sizeof(pts) + sizeof(uvs));
+        size_t posOffset = gStreamVBO.Upload(pts, sizeof(pts));
+        size_t uvOffset  = gStreamVBO.Upload(uvs, sizeof(uvs));
+
+        glVertexAttribPointer(skyboxShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
         glEnableVertexAttribArray(skyboxShader->a_position);
 
-        glVertexAttribPointer(skyboxShader->a_texCoord, 2, GL_FLOAT, GL_FALSE, 0, uvs);
+        glVertexAttribPointer(skyboxShader->a_texCoord, 2, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)uvOffset);
         glEnableVertexAttribArray(skyboxShader->a_texCoord);
     }
 
@@ -286,16 +279,12 @@ void Skybox::RenderUpdate(class Viewport* viewport, int renderLevel)
     }
 #endif
 
-    if (gGLVersion == 1)
-    {
-        glDisableClientState(GL_VERTEX_ARRAY);
-        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-        glDisable(GL_TEXTURE_2D);
-    }
-    else
     {
         glDisableVertexAttribArray(skyboxShader->a_position);
         glDisableVertexAttribArray(skyboxShader->a_texCoord);
+        // Unbind so draw sites still using client-side arrays (not yet converted)
+        // continue to interpret their pointers as CPU addresses.
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
     glFrontFace(GL_CCW);

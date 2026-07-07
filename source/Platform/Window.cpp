@@ -5,11 +5,14 @@
 
 #include <stb_image_write.h>
 
-// AI generated fix for macos build
+// Window.cpp manages the GL context and the single global VAO. It uses only
+// core-profile-safe calls, so on macOS it includes the core gl3.h header
+// (unlike the other rendering TUs which still use the legacy gl.h while the
+// gGLVersion==1 dead code awaits removal in the follow-up cleanup).
 #if defined(_WIN32)
     #include <glad/glad.h>
 #elif defined(PICASIM_MACOS) || defined(__APPLE__)
-    #include <OpenGL/gl.h>
+    #include <OpenGL/gl3.h>
 #else
     #include "GLCompat.h"
 #endif
@@ -71,21 +74,23 @@ bool Window::Init(int width, int height, const char* title, bool fullscreen, int
     if (width <= 0) width = displayMode.w;
     if (height <= 0) height = displayMode.h;
 
-    // Set OpenGL attributes before creating window
-    // Request OpenGL 3.3 Core Profile for desktop, but fall back to 2.1 if needed
+    // Set OpenGL attributes before creating window. The renderer now targets a
+    // modern core profile everywhere (all geometry is VBO-based, shaders are
+    // GLSL core / ES3).
 #if defined(PS_PLATFORM_ANDROID) || defined(PS_PLATFORM_IOS)
-    // Mobile platforms use OpenGL ES 2.0
+    // Mobile platforms use OpenGL ES 3.0
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #elif defined(PS_PLATFORM_MACOS)
-    // macOS only exposes legacy fixed-function via 2.1; avoid core profile which drops our GLSL 120 shaders
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, 0);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    // macOS: OpenGL 4.1 Core (the highest macOS supports) with forward-compat.
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
 #else
-    // Other desktop platforms - OpenGL 3.3 Compatibility Profile (supports legacy + modern GL)
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+    // Other desktop platforms - OpenGL 3.3 Core Profile.
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 #endif
@@ -138,7 +143,8 @@ bool Window::Init(int width, int height, const char* title, bool fullscreen, int
     {
         fprintf(stderr, "SDL_GL_CreateContext failed: %s\n", SDL_GetError());
         
-        // Try fallback: disable MSAA if it was requested
+        // Try fallback: disable MSAA if it was requested (the modern core
+        // profile is a hard requirement now - no legacy downgrade).
         if (msaaSamples > 0)
         {
             fprintf(stderr, "Retrying without MSAA...\n");
@@ -146,25 +152,10 @@ bool Window::Init(int width, int height, const char* title, bool fullscreen, int
             SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
             mContext = SDL_GL_CreateContext(mWindow);
         }
-        
-        // If still failing, try OpenGL 2.1 compatibility mode
+
         if (!mContext)
         {
-            fprintf(stderr, "Retrying with OpenGL 2.1...\n");
-#if defined(PS_PLATFORM_MACOS)
-            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, 0);
-#else
-            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
-#endif
-            SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
-            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-            mContext = SDL_GL_CreateContext(mWindow);
-        }
-        
-        if (!mContext)
-        {
-            fprintf(stderr, "Failed to create any OpenGL context\n");
+            fprintf(stderr, "Failed to create a core-profile OpenGL context: %s\n", SDL_GetError());
             SDL_DestroyWindow(mWindow);
             mWindow = nullptr;
             return false;
@@ -205,6 +196,16 @@ bool Window::Init(int width, int height, const char* title, bool fullscreen, int
 #endif
 #endif
 
+    // Core profiles require a Vertex Array Object to be bound for any draw.
+    // The renderer sets its vertex attribute pointers per-draw rather than
+    // caching them in per-object VAOs, so a single application-wide VAO bound
+    // once here satisfies the requirement for every draw site. (ImGui saves and
+    // restores the bound VAO around its own, so this stays effectively bound.)
+#if !defined(PS_PLATFORM_ANDROID) && !defined(PS_PLATFORM_IOS)
+    glGenVertexArrays(1, &mGlobalVAO);
+    glBindVertexArray(mGlobalVAO);
+#endif
+
     // Enable vsync (1 = enable, 0 = disable, -1 = adaptive)
     SDL_GL_SetSwapInterval(1);
 
@@ -240,8 +241,9 @@ bool Window::Init(int width, int height, const char* title, bool fullscreen, int
         return false;
     }
 
-    GLint depthBits = 0;
-    glGetIntegerv(GL_DEPTH_BITS, &depthBits);
+    // GL_DEPTH_BITS is removed from core profiles; ask SDL for the real value.
+    int depthBits = 0;
+    SDL_GL_GetAttribute(SDL_GL_DEPTH_SIZE, &depthBits);
 
     printf("Window created: %dx%d, OpenGL %d.%d\n", mWidth, mHeight, mGlMajorVersion, mGlMinorVersion);
     printf("OpenGL Vendor: %s\n", vendor);

@@ -154,6 +154,32 @@ static bool InitialiseOptions(GameSettings& gameSettings)
         return true;
 }
 
+// Dev/test capture hook: --fly [aeroplane.xml] [environment.xml] boots straight
+// into free-fly with a known aeroplane + environment (no menu interaction), so
+// golden-image screenshots of flight scenes are repeatable. Combined with
+// --screenshot-after N this gives deterministic per-scene captures.
+static bool        gCaptureFly = false;
+static std::string gCaptureAeroplane;
+static std::string gCaptureEnvironment;
+
+static bool SetupCaptureScene(GameSettings& gameSettings)
+{
+    const std::string aero = gCaptureAeroplane.empty()
+        ? "SystemSettings/Aeroplane/Trainer.xml" : gCaptureAeroplane;
+    const std::string env = gCaptureEnvironment.empty()
+        ? "SystemSettings/Environment/Hills.xml" : gCaptureEnvironment;
+
+    bool aeroOk = gameSettings.mAeroplaneSettings.LoadFromFile(aero);
+    bool ctrlOk = gameSettings.mControllerSettings.LoadFromFile("SystemSettings/Controller/SingleStick.xml");
+    bool envOk  = gameSettings.mEnvironmentSettings.LoadFromFile(env);
+    bool lightOk = gameSettings.mLightingSettings.LoadFromFile("SystemSettings/Lighting/CloudyDaytime.xml");
+    bool objOk  = gameSettings.mObjectsSettings.LoadFromFile(gameSettings.mEnvironmentSettings.mObjectsSettingsFile);
+    TRACE("SetupCaptureScene: aero=%d(%s) ctrl=%d env=%d(%s) light=%d obj=%d(%s)",
+          aeroOk, aero.c_str(), ctrlOk, envOk, env.c_str(), lightOk, objOk,
+          gameSettings.mEnvironmentSettings.mObjectsSettingsFile.c_str());
+    return aeroOk && ctrlOk && envOk && lightOk && objOk;
+}
+
 int32 pauseCallback(void *systemData, void *userData)
 {
     TRACE_FILE_IF(1) TRACE("PicaSim pause start");
@@ -192,6 +218,15 @@ int main(int argc, char* argv[])
                 screenshotFrame = atoi(argv[++i]);
             else if (strcmp(argv[i], "--screenshot-file") == 0 && i + 1 < argc)
                 screenshotFile = argv[++i];
+            else if (strcmp(argv[i], "--fly") == 0)
+            {
+                gCaptureFly = true;
+                // Optional positional args: aeroplane file, then environment file.
+                if (i + 1 < argc && argv[i + 1][0] != '-')
+                    gCaptureAeroplane = argv[++i];
+                if (i + 1 < argc && argv[i + 1][0] != '-')
+                    gCaptureEnvironment = argv[++i];
+            }
         }
         if (screenshotFrame > 0)
             Window::SetAutoScreenshot(screenshotFrame, screenshotFile);
@@ -200,10 +235,7 @@ int main(int argc, char* argv[])
     InitMemoryOverrunCheck();
     MEMTEST();
 
-    // Read GL version setting early (before renderer initialization)
     std::string settingsPath = Platform::GetUserSettingsPath() + "settings.xml";
-    gGLVersion = ReadGLVersionFromSettings(settingsPath.c_str());
-    TRACE_FILE_IF(1) TRACE("GL version from settings: %d", gGLVersion);
 
 #if 0
     s3eGLRegister(S3E_GL_SUSPEND, suspendCallback, 0);
@@ -255,7 +287,9 @@ int main(int argc, char* argv[])
     InitPicaStrings();
     VersionInfo::Init();
 
-    srand(time(0));
+    // In --fly capture mode use a fixed seed so thermals/turbulence (and thus
+    // the aeroplane's pose in screenshots) are reproducible across runs.
+    srand(gCaptureFly ? 12345u : (unsigned)time(0));
 
     MEMTEST();
     // Make sure everything goes out of scope before we close down Marmalade
@@ -331,23 +365,19 @@ int main(int argc, char* argv[])
         LoadingScreen* initialLoadingScreen = new LoadingScreen(GetPS(PS_LOADING, gameSettings.mOptions.mLanguage), gameSettings, true, false, true);
 
         GLint depthBits = 0;
-        // AI generated fix
-        // Query depth buffer size - use Core Profile method if available, with fallback
-        #if defined(PICASIM_MACOS) || defined(PICASIM_LINUX)
-        // OpenGL 3.3+ Core Profile: query framebuffer attachment
-        glBindFramebuffer(GL_FRAMEBUFFER, 0); // Ensure default framebuffer is bound
-        // Query default framebuffer depth attachment size; use GL_DEPTH_ATTACHMENT to avoid invalid enum
-        glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, 
-                                  GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depthBits);
-        // Fallback if Core Profile query returns 0 (common on macOS system framebuffers)
+        // The reliable, profile-independent way to learn the default framebuffer's
+        // depth size is to ask SDL what it actually got. (The GL query for the
+        // default framebuffer must use GL_DEPTH, not GL_DEPTH_ATTACHMENT, on a
+        // core profile - the latter is GL_INVALID_ENUM there and returns 0, and
+        // glGetIntegerv(GL_DEPTH_BITS) is removed from core entirely.)
+        SDL_GL_GetAttribute(SDL_GL_DEPTH_SIZE, &depthBits);
         if (depthBits == 0)
         {
-            glGetIntegerv(GL_DEPTH_BITS, &depthBits);
+            // Fall back to the core default-framebuffer query.
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH,
+                                      GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depthBits);
         }
-        #else
-        // Legacy/compatibility mode
-        glGetIntegerv(GL_DEPTH_BITS, &depthBits);
-        #endif
         TRACE_FILE_IF(1) TRACE("Depth buffer = %d bits", depthBits);
         if (depthBits == 0)
         {
@@ -375,6 +405,10 @@ int main(int argc, char* argv[])
 
         {
             bool doDefaultFreeFly = gameSettings.mOptions.mFreeFlyOnStartup;
+
+            // --fly capture hook: preload a known scene and boot straight into it.
+            if (gCaptureFly && SetupCaptureScene(gameSettings))
+                doDefaultFreeFly = true;
 
             while (1)
             {

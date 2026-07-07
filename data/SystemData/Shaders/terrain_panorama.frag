@@ -1,0 +1,4 @@
+void main()
+{
+    FRAGCOLOR = vec4(1.0, 1.0, 1.0, 1.0);
+}

@@ -341,8 +341,14 @@ bool Options::WriteToDoc(TiXmlDocument& doc) const
     doc.LinkEndChild( element );
     WRITE_ATTRIBUTE(mVersion);
     WRITE_ATTRIBUTE(mFrameworkSettings.mPhysicsSubsteps); 
-    WRITE_ATTRIBUTE(mFrameworkSettings.mUseMultiLights); 
-    WRITE_DOUBLE_ATTRIBUTE(mMaxNearClipDistance); 
+    WRITE_ATTRIBUTE(mFrameworkSettings.mUseMultiLights);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mClassicRendering);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mBloomEnabled);
+    WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mBloomIntensity);
+    WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mExposure);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mFXAAEnabled);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mPBRTonemap);
+    WRITE_DOUBLE_ATTRIBUTE(mMaxNearClipDistance);
     WRITE_ATTRIBUTE(mSeparateSpecular);
     WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mFarClipPlaneDistance); 
 
@@ -493,6 +499,15 @@ bool Options::ReadFromDoc(TiXmlDocument& doc, bool readAll)
 
     READ_ATTRIBUTE(mFrameworkSettings.mPhysicsSubsteps);
     READ_ATTRIBUTE(mFrameworkSettings.mUseMultiLights);
+    // Additive HDR/post-process settings - absent in older settings.xml, in
+    // which case the constructor defaults (classic off, bloom off, exposure 1)
+    // are kept, so old configs load unchanged.
+    READ_ATTRIBUTE(mFrameworkSettings.mClassicRendering);
+    READ_ATTRIBUTE(mFrameworkSettings.mBloomEnabled);
+    READ_ATTRIBUTE(mFrameworkSettings.mBloomIntensity);
+    READ_ATTRIBUTE(mFrameworkSettings.mExposure);
+    READ_ATTRIBUTE(mFrameworkSettings.mFXAAEnabled);
+    READ_ATTRIBUTE(mFrameworkSettings.mPBRTonemap);
     READ_ATTRIBUTE(mMaxNearClipDistance);
     READ_ATTRIBUTE(mSeparateSpecular);
     READ_ATTRIBUTE(mFrameworkSettings.mFarClipPlaneDistance);

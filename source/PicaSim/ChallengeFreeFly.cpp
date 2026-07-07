@@ -398,26 +398,18 @@ void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
             x0, y1, 0,
         };
 
-        if (gGLVersion == 1)
-        {
-            glDisable(GL_TEXTURE_2D);
-            glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-            glEnableClientState(GL_VERTEX_ARRAY);
-            glVertexPointer(3, GL_FLOAT, 0, pts);
-            glColor4f(c, c, c, a);
-            glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-            glDisableClientState(GL_VERTEX_ARRAY);
-        }
-        else
         {
             const ControllerShader* shader = (ControllerShader*) ShaderManager::GetInstance().GetShader(SHADER_CONTROLLER);
             shader->Use();
-            glVertexAttribPointer(shader->a_position, 3, GL_FLOAT, GL_FALSE, 0, pts);
+            gStreamVBO.Bind();
+            size_t posOffset = gStreamVBO.Upload(pts, sizeof(pts));
+            glVertexAttribPointer(shader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
             glEnableVertexAttribArray(shader->a_position);
             glUniform4f(shader->u_colour, c, c, c, a);
             esSetModelViewProjectionMatrix(shader->u_mvpMatrix);
             glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
             glDisableVertexAttribArray(shader->a_position);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
         }
     }
     font.RenderText(txt);

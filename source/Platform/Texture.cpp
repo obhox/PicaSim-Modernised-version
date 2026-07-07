@@ -227,18 +227,21 @@ void Texture::Upload()
 
     glBindTexture(GL_TEXTURE_2D, mTextureID);
 
-    // Determine GL format based on channels
+    // Determine GL format based on channels. The core profile removed the
+    // GL_LUMINANCE / GL_LUMINANCE_ALPHA formats, so single- and dual-channel
+    // textures use GL_RED / GL_RG and reproduce the old luminance sampling
+    // ((L,L,L,1) and (L,L,L,A)) with a texture swizzle below.
     GLenum format = GL_RGBA;
     GLenum internalFormat = GL_RGBA;
     switch (mCachedChannels)
     {
     case 1:
-        format = GL_LUMINANCE;
-        internalFormat = GL_LUMINANCE;
+        format = GL_RED;
+        internalFormat = GL_R8;
         break;
     case 2:
-        format = GL_LUMINANCE_ALPHA;
-        internalFormat = GL_LUMINANCE_ALPHA;
+        format = GL_RG;
+        internalFormat = GL_RG8;
         break;
     case 3:
         format = GL_RGB;
@@ -255,6 +258,22 @@ void Texture::Upload()
 
     // Upload texture data
     glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, mWidth, mHeight, 0, format, GL_UNSIGNED_BYTE, mCachedData);
+
+    // Luminance emulation via swizzle (core has no GL_LUMINANCE*).
+    if (mCachedChannels == 1)
+    {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
+    }
+    else if (mCachedChannels == 2)
+    {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_GREEN);
+    }
 
     // Set default filtering
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

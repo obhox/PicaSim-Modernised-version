@@ -14,7 +14,7 @@
 #if defined(_WIN32)
     #include <glad/glad.h>
 #elif defined(PICASIM_MACOS) || defined(__APPLE__)
-    #include <OpenGL/gl.h>
+    #include <OpenGL/gl3.h>
 #else
     #include "GLCompat.h"
 #endif

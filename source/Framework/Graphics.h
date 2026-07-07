@@ -19,19 +19,17 @@
 #include <OpenGLES/ES2/glext.h>
 #else
 #if defined(PICASIM_MACOS)
-  #include <OpenGL/gl.h>
+  #include <OpenGL/gl3.h>
 #else
   #ifdef __APPLE__
     #include <OpenGL/gl.h>
     #else
-    
-    #endif
-#endif
-#include <GL/glext.h>
-#endif
-#endif
 
-extern int gGLVersion;
+    #endif
+  #include <GL/glext.h>
+#endif
+#endif
+#endif
 
 // GL error checking for debug builds. PICASIM_CHECK_GL_ERRORS() drains the GL
 // error queue and reports each error with the call site. Compiles to nothing
@@ -117,6 +115,48 @@ GLuint esLoadShader( GLenum type, const char *shaderSrc );
 /// \param fragShaderSrc Fragment shader source code
 /// \return A new program object linked with the vertex/fragment shader pair, 0 on failure
 GLuint esLoadProgram( const char *vertShaderSrc, const char *fragShaderSrc );
+
+//======================================================================================================================
+// StreamVBO - a shared streaming vertex buffer used to turn client-side vertex
+// array draws into VBO-based draws (required by the GL core profile). Callers
+// upload their per-frame or small static vertex data here, then point
+// glVertexAttribPointer at byte offsets into this buffer instead of at CPU
+// pointers. One global instance (gStreamVBO) is shared by all such draw sites;
+// each site uploads and draws before the next uses it, so a single ring buffer
+// with orphan-on-wrap is safe.
+//
+// Single interleaved array:
+//   gStreamVBO.Bind();
+//   size_t off = gStreamVBO.Upload(data, bytes);
+//   glVertexAttribPointer(loc, n, GL_FLOAT, GL_FALSE, stride, (GLvoid*)off);
+//
+// Separate attribute arrays sharing the buffer (reserve first so they stay
+// contiguous - no wrap between the uploads):
+//   gStreamVBO.Bind();
+//   gStreamVBO.Reserve(posBytes + uvBytes);
+//   size_t o0 = gStreamVBO.Upload(pos, posBytes);
+//   size_t o1 = gStreamVBO.Upload(uv,  uvBytes);
+class StreamVBO
+{
+public:
+    // Bind GL_ARRAY_BUFFER to the shared buffer (lazily creating it).
+    void Bind();
+    // Ensure room for a group of uploads totalling `bytes` without wrapping
+    // between them. Call before a sequence of Upload() calls for one draw.
+    void Reserve(size_t bytes);
+    // Copy `bytes` from `data` into the buffer; returns the byte offset to pass
+    // to glVertexAttribPointer. Grows or wraps (orphaning) as needed.
+    size_t Upload(const void* data, size_t bytes);
+    // Release GL resources (called at shutdown).
+    void Terminate();
+private:
+    size_t EnsureRoom(size_t bytes);
+    GLuint mVBO = 0;
+    size_t mCapacity = 0;
+    size_t mCursor = 0;
+};
+
+extern StreamVBO gStreamVBO;
 
 /// \brief multiply matrix specified by result with a scaling matrix and return new matrix in result
 /// \param result Specifies the input matrix.  Scaled matrix is returned in result.
@@ -230,6 +270,26 @@ void esSetTextureMatrix(int textureMatrixLoc);
 /// Sets the lighting shader variables
 void esSetLighting(const struct LightShaderInfo lightShaderInfo[5]);
 
+// PBR-lite state for the aircraft model shaders. Computed once per frame from
+// the environment lighting (RenderManager::SetupLighting) and consumed by
+// RenderModel::PartRenderPre. shCoeffs are VIEW-space SH radiance coefficients.
+struct ModelPBRState
+{
+    int   usePBR;          // 0 / 1 master switch (settings-driven)
+    float shAmbientScale;  // multiplies the SH ambient term (tuning knob)
+    float shCoeffs[9][3];  // view-space SH radiance coefficients (RGB)
+};
+extern ModelPBRState gModelPBRState;
+
+// Rebuilds gModelPBRState. Uses the already-transformed view-space sun direction
+// (light 0) so the SH ambient stays locked to the world sun as the camera moves.
+// ambientColour reproduces today's flat fill; sunAmbientFill adds a subtle
+// sun-direction gradient on top. Call after light 0's position has been set.
+void esComputeModelPBRState(bool usePBR, float shAmbientScale,
+                            const GLfloat ambientColour[4],
+                            const GLfloat sunDiffuseColour[4],
+                            float sunAmbientFill);
+
 // Returns the view transform (inverse of camera) as well as setting up the GL modelview matrix (OpenGL 1)
 void LookAt(
     GLMat44& viewTM,
@@ -239,8 +299,8 @@ void LookAt(
 
 // Natural lighting state is off
 struct EnableLighting {
-    EnableLighting() {if (gGLVersion == 1) glEnable(GL_LIGHTING);}
-    ~EnableLighting() {if (gGLVersion == 1) glDisable(GL_LIGHTING);}
+    EnableLighting() {}
+    ~EnableLighting() {}
 };
 
 struct EnableBlend {
@@ -259,13 +319,13 @@ struct DisableDepthTest {
 };
 
 struct EnableNormalScaling {
-    EnableNormalScaling() {if (gGLVersion == 1) glEnable(GL_RESCALE_NORMAL);}
-    ~EnableNormalScaling() {if (gGLVersion == 1) glDisable(GL_RESCALE_NORMAL);}
+    EnableNormalScaling() {}
+    ~EnableNormalScaling() {}
 };
 
 struct EnableNormalNormalisation {
-    EnableNormalNormalisation() {if (gGLVersion == 1) glEnable(GL_NORMALIZE);}
-    ~EnableNormalNormalisation() {if (gGLVersion == 1) glDisable(GL_NORMALIZE);}
+    EnableNormalNormalisation() {}
+    ~EnableNormalNormalisation() {}
 };
 
 struct EnableCullFace {

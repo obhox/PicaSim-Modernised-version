@@ -17,6 +17,8 @@ class RenderObject;
 class RenderOverlayObject;
 class DebugRenderer;
 class Viewport;
+class HdrRenderTarget;
+class PostProcess;
 struct DisplayConfig;
 
 enum RenderLevels
@@ -162,7 +164,18 @@ private:
     void RenderFPS();
     void SetupLighting();
 
+    // Lazily creates / resizes the HDR scene target and post-processor. Returns
+    // false if the HDR path is unavailable (falls back to classic rendering).
+    bool EnsureHdrResources(int width, int height);
+
     static RenderManager* mInstance;
+
+    // HDR / post-process pipeline (null until first used; skipped entirely when
+    // FrameworkSettings::mClassicRendering is set).
+    HdrRenderTarget* mHdrTarget;
+    PostProcess*     mPostProcess;
+    int              mHdrWidth;
+    int              mHdrHeight;
 
     Viewports mViewports;
     Cameras mCameras;

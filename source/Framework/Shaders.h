@@ -2,6 +2,9 @@
 #define SHADERS_H
 
 #include "Graphics.h"
+#include <string>
+#include <vector>
+#include <cstdint>
 
 //======================================================================================================================
 class Shader
@@ -9,15 +12,30 @@ class Shader
 public:
     Shader() : mShaderProgram(0), mVertexShaderStr(0), mFragmentShaderStr(0) {}
     virtual ~Shader() {}
+    // Legacy: compile directly from in-memory source strings (retained for any
+    // external callers; the built-in shaders now load from disk).
     virtual void Init(const char* vertexShaderStr, const char* fragmentShaderStr);
+    // Load, preprocess and compile the named on-disk shader files (e.g.
+    // "model.vert" / "model.frag"), recording their source files for hot-reload.
+    void InitFromFiles(const char* vertexFileName, const char* fragmentFileName);
     virtual void Init() = 0;
     void Terminate();
     void Use() const;
+
+    // Debug hot-reload: has any source file changed on disk since last compile?
+    bool NeedsReload() const;
+    // Re-run this shader's Init() (reloads from disk and re-queries locations).
+    void Reload();
 protected:
     friend class ShaderManager;
     GLuint      mShaderProgram;
     const char* mVertexShaderStr;
     const char* mFragmentShaderStr;
+
+    // Hot-reload bookkeeping (populated by InitFromFiles).
+    std::string mVertexFileName;
+    std::string mFragmentFileName;
+    std::vector<std::pair<std::string, int64_t> > mSourceFileTimes;
 };
 
 //======================================================================================================================
@@ -73,6 +91,8 @@ public:
     LightShaderInfo lightShaderInfo[5];
     int u_mvpMatrix, u_normalMatrix;
     int u_specularAmount, u_specularExponent, a_position, a_normal, a_colour;
+    // PBR-lite uniforms (may be -1 if the driver strips them). See common/pbr.glsl.
+    int u_usePBR, u_roughness, u_metallic, u_shCoeffs, u_shAmbientScale;
 };
 
 //======================================================================================================================

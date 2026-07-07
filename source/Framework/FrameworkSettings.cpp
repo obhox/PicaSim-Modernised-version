@@ -15,7 +15,15 @@ FrameworkSettings::FrameworkSettings()
     mPhysicsSubsteps(8),
     mNearClipPlaneDistance(0.5f),
     mFarClipPlaneDistance(50000.0f),
-    mUseMultiLights(true)
+    mUseMultiLights(true),
+    mClassicRendering(false),
+    mBloomEnabled(false),
+    mBloomIntensity(0.15f),
+    mExposure(1.0f),
+    mFXAAEnabled(false),
+    mPBRTonemap(false),
+    mUsePBR(true),
+    mSHAmbientScale(1.0f)
 {
     // Get platform type
     mPlatform = Platform::GetPlatformID();

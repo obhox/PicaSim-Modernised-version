@@ -777,20 +777,6 @@ void AeroplaneGraphics::RenderUpdateComponents(Viewport* viewport, int renderLev
 
     float specularAmount = 0.5f;
     float specularExponent = 100.0f;
-    if (gGLVersion == 1)
-    {
-        if (renderLevel != RENDER_LEVEL_TERRAIN_SHADOW)
-            glEnable(GL_LIGHTING);
-        GLfloat mat[] = {specularAmount, specularAmount, specularAmount, 1.0f};
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, mat);
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, specularExponent); // smooth surface = large numbers = small highlights
-
-        // Overwrites the actual material for ambient and diffuse, front and back
-        glEnable(GL_COLOR_MATERIAL);
-
-        glEnableClientState(GL_VERTEX_ARRAY);
-    }
-    else
     {
         modelShader->Use();
         glUniform1f(modelShader->u_specularExponent, specularExponent);
@@ -802,6 +788,13 @@ void AeroplaneGraphics::RenderUpdateComponents(Viewport* viewport, int renderLev
         glDisableVertexAttribArray(modelShader->a_colour);
 
         esSetLighting(modelShader->lightShaderInfo);
+    }
+
+    {
+        // Upload the box quad once; the per-box face draws below reuse it.
+        gStreamVBO.Bind();
+        size_t posOffset = gStreamVBO.Upload(boxPoints, sizeof(boxPoints));
+        glVertexAttribPointer(modelShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
     }
 
     Transform aeroplaneTM = mAeroplane->GetTransform();
@@ -818,14 +811,8 @@ void AeroplaneGraphics::RenderUpdateComponents(Viewport* viewport, int renderLev
 
         esScalef(box.mExtents.x, box.mExtents.y, box.mExtents.z);
 
-        if (gGLVersion == 1)
         {
-            glVertexPointer(3, GL_FLOAT, 0, boxPoints);
-            glNormal3f(0, 0, box.mExtents.z);
-        }
-        else
-        {
-            glVertexAttribPointer(modelShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) boxPoints);
+            // a_position was pointed at the shared streaming VBO before the loop.
             glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.z);
         }
 
@@ -837,25 +824,16 @@ void AeroplaneGraphics::RenderUpdateComponents(Viewport* viewport, int renderLev
 
 
         // draw the top and then round the sides
-        if (gGLVersion == 1)
-            glColor4f(colourTop.x, colourTop.y, colourTop.z, 1.0f);
-        else
-            glVertexAttrib4f(modelShader->a_colour, colourTop.x, colourTop.y, colourTop.z, 1.0f);
+        glVertexAttrib4f(modelShader->a_colour, colourTop.x, colourTop.y, colourTop.z, 1.0f);
 
         esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
         //==================================================================================
         // Front
-        if (gGLVersion == 1)
-            glColor4f(colourFront.x, colourFront.y, colourFront.z, 1.0f);
-        else
-            glVertexAttrib4f(modelShader->a_colour, colourFront.x, colourFront.y, colourFront.z, 1.0f);
+        glVertexAttrib4f(modelShader->a_colour, colourFront.x, colourFront.y, colourFront.z, 1.0f);
 
-        if (gGLVersion == 1)
-            glNormal3f(0, 0, box.mExtents.x);
-        else
-            glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.y);
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.y);
 
         ROTATE_90_Y;
         esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
@@ -864,49 +842,31 @@ void AeroplaneGraphics::RenderUpdateComponents(Viewport* viewport, int renderLev
 
         //==================================================================================
         // Sides
-        if (gGLVersion == 1)
-            glColor4f(colourSides.x, colourSides.y, colourSides.z, 1.0f);
-        else
-            glVertexAttrib4f(modelShader->a_colour, colourSides.x, colourSides.y, colourSides.z, 1.0f);
+        glVertexAttrib4f(modelShader->a_colour, colourSides.x, colourSides.y, colourSides.z, 1.0f);
 
-        if (gGLVersion == 1)
-            glNormal3f(0, 0, box.mExtents.y);
-        else
-            glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.x);
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.x);
 
         ROTATE_90_X;
         esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
         //==================================================================================
-        if (gGLVersion == 1)
-            glNormal3f(0, 0, box.mExtents.y);
-        else
-            glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.y);
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.y);
 
         ROTATE_90_X;
         esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-        if (gGLVersion == 1)
-            glNormal3f(0, 0, box.mExtents.y);
-        else
-            glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.x);
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.x);
 
         ROTATE_90_X;
         esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
         //==================================================================================
-        if (gGLVersion == 1)
-            glColor4f(colourBottom.x, colourBottom.y, colourBottom.z, 1.0f);
-        else
-            glVertexAttrib4f(modelShader->a_colour, colourBottom.x, colourBottom.y, colourBottom.z, 1.0f);
+        glVertexAttrib4f(modelShader->a_colour, colourBottom.x, colourBottom.y, colourBottom.z, 1.0f);
 
-        if (gGLVersion == 1)
-            glNormal3f(0, 0, box.mExtents.z);
-        else
-            glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.z);
+        glVertexAttrib3f(modelShader->a_normal, 0, 0, 1.0f/box.mExtents.z);
 
         ROTATE_90_Y;
         esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
@@ -914,14 +874,9 @@ void AeroplaneGraphics::RenderUpdateComponents(Viewport* viewport, int renderLev
 
         esPopMatrix();
     }
-    if (gGLVersion == 1)
     {
-        glDisable(GL_COLOR_MATERIAL);
-        glDisableClientState(GL_VERTEX_ARRAY);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
-
-    if (renderLevel != RENDER_LEVEL_TERRAIN_SHADOW)
-        glDisable(GL_LIGHTING);
 }
 
 //======================================================================================================================
@@ -939,18 +894,6 @@ void AeroplaneGraphics::RenderUpdatePropDisks(Viewport* viewport, int renderLeve
 
     float specularAmount = 0.5f;
     float specularExponent = 10.0f;
-    if (gGLVersion == 1)
-    {
-        GLfloat mat[] = {specularAmount, specularAmount, specularAmount, 1.0f};
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, mat);
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, specularExponent); // smooth surface = large numbers = small highlights
-
-        // Overwrites the actual material for ambient and diffuse, front and back
-        glEnable(GL_COLOR_MATERIAL);
-
-        glEnableClientState(GL_VERTEX_ARRAY);
-    }
-    else
     {
         modelShader->Use();
 
@@ -1003,32 +946,23 @@ void AeroplaneGraphics::RenderUpdatePropDisks(Viewport* viewport, int renderLeve
         ConvertTransformToGLMat44(tm, glTM);
         esMultMatrixf(&glTM[0][0]);
 
-        if (gGLVersion == 1)
         {
-            glVertexPointer(3, GL_FLOAT, 0, diskPoints);
-            glNormal3f(0.0f, 0, 0.0f);
-        }
-        else
-        {
-            glVertexAttribPointer(modelShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*) diskPoints);
+            gStreamVBO.Bind();
+            size_t posOffset = gStreamVBO.Upload(diskPoints, mNumPropDiskPoints * 3 * sizeof(GLfloat));
+            glVertexAttribPointer(modelShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
             glVertexAttrib3f(modelShader->a_normal, 0.0f, 0, 0.0f);
         }
 
         // Set the colour
-        if (gGLVersion == 1)
-            glColor4f(propDisk.mColour.x, propDisk.mColour.y, propDisk.mColour.z, propDisk.mColour.w * opacity);
-        else
-            glVertexAttrib4f(modelShader->a_colour, propDisk.mColour.x, propDisk.mColour.y, propDisk.mColour.z, propDisk.mColour.w * opacity);
+        glVertexAttrib4f(modelShader->a_colour, propDisk.mColour.x, propDisk.mColour.y, propDisk.mColour.z, propDisk.mColour.w * opacity);
 
         esSetModelViewProjectionAndNormalMatrix(modelShader->u_mvpMatrix, modelShader->u_normalMatrix);
         glDrawArrays(GL_TRIANGLE_FAN, 0, mNumPropDiskPoints);
 
         esPopMatrix();
     }
-    if (gGLVersion == 1)
     {
-        glDisable(GL_COLOR_MATERIAL);
-        glDisableClientState(GL_VERTEX_ARRAY);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 }
 
@@ -1037,13 +971,6 @@ void AeroplaneGraphics::RenderUpdate3DS(Viewport* viewport, int renderLevel)
 {
     TRACE_METHOD_ONLY(2);
     const Options& options = PicaSim::GetInstance().GetSettings().mOptions;
-    if (gGLVersion == 1)
-    {
-        if (renderLevel == RENDER_LEVEL_TERRAIN_SHADOW)
-            glDisable(GL_FOG);
-        else
-            glEnable(GL_LIGHTING);
-    }
     glDisable(GL_BLEND);
 
     Transform aeroplaneTM = mAeroplane->GetTransform();
@@ -1066,12 +993,6 @@ void AeroplaneGraphics::RenderUpdate3DS(Viewport* viewport, int renderLevel)
         mRenderModel.Render(0, false, options.mSeparateSpecular);
     }
     esPopMatrix();
-
-    if (gGLVersion == 1) 
-    {
-        if (renderLevel != RENDER_LEVEL_TERRAIN_SHADOW)
-            glDisable(GL_LIGHTING);
-    }
 }
 
 //======================================================================================================================

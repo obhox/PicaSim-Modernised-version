@@ -23,6 +23,26 @@ struct FrameworkSettings
     float mFarClipPlaneDistance;
     bool  mUseMultiLights;
 
+    // HDR / post-processing pipeline (Phase 1c). When mClassicRendering is true
+    // the 3D scene is drawn straight to the default framebuffer as it always was
+    // (the safety escape hatch / low-end tier). Otherwise the scene is rendered
+    // to a floating-point HDR target and resolved through PostProcess (tonemap,
+    // optional bloom / FXAA). Bloom is OFF by default so the output stays
+    // near-identical to the classic path.
+    bool  mClassicRendering;
+    bool  mBloomEnabled;
+    float mBloomIntensity;
+    float mExposure;
+    bool  mFXAAEnabled;
+    bool  mPBRTonemap;   // false => identity clamp (preserve LDR look); true => PBR Neutral tonemap
+
+    // PBR-lite aircraft-model shading (Cook-Torrance GGX + SH ambient). When
+    // false the models fall back to the legacy Phong path. Forced off when
+    // mClassicRendering is set. mSHAmbientScale tunes the environment-ambient
+    // brightness (1.0 ~= the old flat fill).
+    bool  mUsePBR;
+    float mSHAmbientScale;
+
     Platform::PlatformID mPlatform;
     mutable int mScreenWidth, mScreenHeight;
 };

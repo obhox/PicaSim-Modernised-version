@@ -17,8 +17,6 @@
 // UI Helpers
 #include "../PicaSim/Menus/UIHelpers.h"
 
-int gGLVersion = 2;
-
 #ifdef PICASIM_GL_STRICT
 void ReportGLErrors(const char* file, int line)
 {
@@ -93,14 +91,18 @@ int eglInit(bool createSurface, int msaaSamples)
         int glMajor = gWindow->GetGLMajorVersion();
         int glMinor = gWindow->GetGLMinorVersion();
         const char* glslVersion = nullptr;
-        
-        if (glMajor >= 3 && glMinor >= 3)
+
+        // #version 150 is ImGui's core-profile GLSL and is valid on every core
+        // context we create (macOS 4.1, desktop 3.3). Note the version test must
+        // compare the whole version, not major>=3 && minor>=3 (which wrongly
+        // rejected 4.1, where minor==1, and fell back to the core-invalid 130).
+        if (glMajor > 3 || (glMajor == 3 && glMinor >= 2))
         {
-            glslVersion = "#version 150"; // OpenGL 3.3+
+            glslVersion = "#version 150"; // OpenGL 3.2+ core
         }
         else if (glMajor >= 3)
         {
-            glslVersion = "#version 130"; // OpenGL 3.0-3.2
+            glslVersion = "#version 130"; // OpenGL 3.0-3.1
         }
         else
         {
@@ -120,8 +122,6 @@ int eglInit(bool createSurface, int msaaSamples)
     // Initialize font renderer
     FontRenderer::GetInstance().Init();
 
-    printf("Using OpenGL version mode: %d\n", gGLVersion);
-
     return 0;
 }
 
@@ -130,6 +130,9 @@ void eglTerm(bool destroySurface)
 {
     if (destroySurface)
     {
+        // Release the shared streaming vertex buffer.
+        gStreamVBO.Terminate();
+
         // Shutdown font renderer
         FontRenderer::GetInstance().Shutdown();
 
@@ -209,44 +212,6 @@ static GLfloat UITextureMatrix[16] = {
 //======================================================================================================================
 void ResetGraphicsState(bool clear)
 {
-    if (gGLVersion == 1)
-    {
-        // Reset texture units
-        glActiveTexture(GL_TEXTURE1);
-        glDisable(GL_TEXTURE_2D);
-        glMatrixMode(GL_TEXTURE);
-        glLoadIdentity();
-
-        glActiveTexture(GL_TEXTURE0);
-        glDisable(GL_TEXTURE_2D);
-        glMatrixMode(GL_TEXTURE);
-        glGetFloatv(GL_TEXTURE_MATRIX, UITextureMatrix);
-        glLoadIdentity();
-
-        glDisable(GL_BLEND);
-        glDisable(GL_ALPHA_TEST);
-
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-
-        glShadeModel(GL_SMOOTH);
-
-        glDisableClientState(GL_COLOR_ARRAY);
-        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-        glDisableClientState(GL_VERTEX_ARRAY);
-
-        GLfloat mat[] = {0, 0, 0, 0};
-        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, mat);
-
-        float col = 0.0f;
-        glClearColor(col, col, col, 1.0f);
-        if (clear)
-        {
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            if (gWindow)
-                gWindow->SwapBuffers();
-        }
-    }
 }
 
 // Legacy compatibility function names
@@ -255,36 +220,6 @@ void RecoverFromIwGx(bool clear) { ResetGraphicsState(clear); }
 //======================================================================================================================
 void PrepareForUIRendering(bool clear)
 {
-    if (gGLVersion == 1)
-    {
-        glDisable(GL_LIGHTING);
-        glEnable(GL_BLEND);
-        glEnable(GL_ALPHA_TEST);
-        glShadeModel(GL_FLAT);
-
-        glActiveTexture(GL_TEXTURE0);
-        glEnable(GL_TEXTURE_2D);
-        glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-        glMatrixMode(GL_TEXTURE);
-        glLoadIdentity();
-        glMultMatrixf(UITextureMatrix);
-
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-
-        glDisableClientState(GL_COLOR_ARRAY);
-        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-        glDisableClientState(GL_VERTEX_ARRAY);
-
-        float col = 1.0f;
-        glClearColor(col, col, col, 1.0f);
-        if (clear)
-        {
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            if (gWindow)
-                gWindow->SwapBuffers();
-        }
-    }
 }
 
 // Legacy compatibility function name
@@ -369,14 +304,7 @@ void LookAt(
 
     esMatrixTranslate(viewMatrix, -eyex, -eyey, -eyez);
 
-    if (gGLVersion == 1)
-    {
-        glMultMatrixf(m);
-    }
-    else
-    {
-        esMatrixMultiply(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], viewMatrix, gMatrixStack[gModeIndex][gStackIndex[gModeIndex]]); // right way round?
-    }
+    esMatrixMultiply(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], viewMatrix, gMatrixStack[gModeIndex][gStackIndex[gModeIndex]]); // right way round?
 }
 
 //======================================================================================================================
@@ -521,44 +449,73 @@ void SaveScreenshotAsTexture(Texture* texture)
 }
 
 //======================================================================================================================
-void glMatrixRotateFast(GLfloat sinAngle, GLfloat cosAngle, GLfloat x, GLfloat y, GLfloat z)
+//======================================================================================================================
+// StreamVBO - shared streaming vertex buffer (see Graphics.h).
+//======================================================================================================================
+StreamVBO gStreamVBO;
+
+static const size_t STREAM_VBO_INITIAL_CAPACITY = 1 << 20; // 1 MB
+
+void StreamVBO::Bind()
 {
-    GLfloat xx, yy, zz, xy, yz, zx, xs, ys, zs;
-    GLfloat oneMinusCos;
-    GLMat44 rotMat;
+    if (mVBO == 0)
+    {
+        glGenBuffers(1, &mVBO);
+        glBindBuffer(GL_ARRAY_BUFFER, mVBO);
+        mCapacity = STREAM_VBO_INITIAL_CAPACITY;
+        mCursor = 0;
+        glBufferData(GL_ARRAY_BUFFER, mCapacity, NULL, GL_DYNAMIC_DRAW);
+    }
+    else
+    {
+        glBindBuffer(GL_ARRAY_BUFFER, mVBO);
+    }
+}
 
-    xx = x * x;
-    yy = y * y;
-    zz = z * z;
-    xy = x * y;
-    yz = y * z;
-    zx = z * x;
-    xs = x * sinAngle;
-    ys = y * sinAngle;
-    zs = z * sinAngle;
-    oneMinusCos = 1.0f - cosAngle;
+size_t StreamVBO::EnsureRoom(size_t bytes)
+{
+    if (bytes > mCapacity)
+    {
+        // Grow to fit (with headroom) and start from the beginning.
+        mCapacity = bytes + bytes / 2;
+        glBufferData(GL_ARRAY_BUFFER, mCapacity, NULL, GL_DYNAMIC_DRAW);
+        mCursor = 0;
+    }
+    else if (mCursor + bytes > mCapacity)
+    {
+        // Wrap to the start, orphaning the old backing store so the driver can
+        // hand us fresh memory instead of stalling on in-flight draws.
+        glBufferData(GL_ARRAY_BUFFER, mCapacity, NULL, GL_DYNAMIC_DRAW);
+        mCursor = 0;
+    }
+    return mCursor;
+}
 
-    rotMat[0][0] = (oneMinusCos * xx) + cosAngle;
-    rotMat[1][0] = (oneMinusCos * xy) - zs;
-    rotMat[2][0] = (oneMinusCos * zx) + ys;
-    rotMat[3][0] = 0.0F; 
+void StreamVBO::Reserve(size_t bytes)
+{
+    Bind();
+    EnsureRoom(bytes);
+}
 
-    rotMat[0][1] = (oneMinusCos * xy) + zs;
-    rotMat[1][1] = (oneMinusCos * yy) + cosAngle;
-    rotMat[2][1] = (oneMinusCos * yz) - xs;
-    rotMat[3][1] = 0.0F;
+size_t StreamVBO::Upload(const void* data, size_t bytes)
+{
+    if (mVBO == 0)
+        Bind();
+    size_t offset = EnsureRoom(bytes);
+    glBufferSubData(GL_ARRAY_BUFFER, offset, bytes, data);
+    mCursor += bytes;
+    return offset;
+}
 
-    rotMat[0][2] = (oneMinusCos * zx) - ys;
-    rotMat[1][2] = (oneMinusCos * yz) + xs;
-    rotMat[2][2] = (oneMinusCos * zz) + cosAngle;
-    rotMat[3][2] = 0.0F; 
-
-    rotMat[0][3] = 0.0F;
-    rotMat[1][3] = 0.0F;
-    rotMat[2][3] = 0.0F;
-    rotMat[3][3] = 1.0F;
-
-    glMultMatrixf(&rotMat[0][0]);
+void StreamVBO::Terminate()
+{
+    if (mVBO != 0)
+    {
+        glDeleteBuffers(1, &mVBO);
+        mVBO = 0;
+    }
+    mCapacity = 0;
+    mCursor = 0;
 }
 
 //======================================================================================================================
@@ -939,10 +896,7 @@ void esMatrixCopyRotation(GLMat33& result, const GLMat44& src)
 //======================================================================================================================
 void esMatrixMode(GLenum mode)
 {
-    if (gGLVersion == 1)
-        glMatrixMode(mode);
-    else
-        gModeIndex = mode - GL_MODELVIEW;
+    gModeIndex = mode - GL_MODELVIEW;
 }
 
 //======================================================================================================================
@@ -963,11 +917,6 @@ void esMatrixTransform3x3(GLVec4& result, const GLMat44& m, const GLVec4& v)
 //======================================================================================================================
 void esPushMatrix()
 {
-    if (gGLVersion == 1)
-    {
-        glPushMatrix();
-    }
-    else
     {
         esMatrixCopy(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]+1], gMatrixStack[gModeIndex][gStackIndex[gModeIndex]]);
         ++gStackIndex[gModeIndex];
@@ -976,101 +925,59 @@ void esPushMatrix()
 
 void esLoadIdentity()
 {
-    if (gGLVersion == 1)
-        glLoadIdentity();
-    else
-        esMatrixLoadIdentity(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]]);
+    esMatrixLoadIdentity(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]]);
 }
 
 void esPopMatrix()
 {
-    if (gGLVersion == 1)
-        glPopMatrix();
-    else
-        --gStackIndex[gModeIndex];
+    --gStackIndex[gModeIndex];
 }
 
 void esTranslatef(float x, float y, float z)
 {
-    if (gGLVersion == 1)
-        glTranslatef(x, y, z);
-    else
-        esMatrixTranslate(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], x, y, z);
+    esMatrixTranslate(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], x, y, z);
 }
 
 void esRotatef(float angle, float x, float y, float z)
 {
-    if (gGLVersion == 1)
-        glRotatef(angle, x, y, z);
-    else
-        esMatrixRotate(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], angle, x, y, z);
+    esMatrixRotate(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], angle, x, y, z);
 }
 
 void esRotateFast(float sinAngle, float cosAngle, float x, float y, float z)
 {
-    if (gGLVersion == 1)
-    {
-        glMatrixRotateFast(sinAngle, cosAngle, x, y, z);
-    }
-    else
-    {
-        esMatrixRotateFast(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], sinAngle, cosAngle, x, y, z);
-    }
+    esMatrixRotateFast(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], sinAngle, cosAngle, x, y, z);
 }
 
 void esScalef(float x, float y, float z)
 {
-    if (gGLVersion == 1)
-        glScalef(x, y, z);
-    else
-        esMatrixScale(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], x, y, z);
+    esMatrixScale(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], x, y, z);
 }
 
 void esMultMatrixf(const float* m)
 {
-    if (gGLVersion == 1)
-        glMultMatrixf(m);
-    else
-        esMatrixMultiply(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], 
-        *((GLMat44*) m),
-        gMatrixStack[gModeIndex][gStackIndex[gModeIndex]]);
+    esMatrixMultiply(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]],
+    *((GLMat44*) m),
+    gMatrixStack[gModeIndex][gStackIndex[gModeIndex]]);
 }
 
 void esGetMatrix(GLMat44& m, GLenum mode)
 {
-    if (gGLVersion == 1)
-    {
-        glGetFloatv(GL_MODELVIEW_MATRIX + mode - GL_MODELVIEW, &m[0][0]);
-    }
-    else
-    {
-        esMatrixCopy(m, gMatrixStack[mode - GL_MODELVIEW][gStackIndex[mode - GL_MODELVIEW]]);
-    }
+    esMatrixCopy(m, gMatrixStack[mode - GL_MODELVIEW][gStackIndex[mode - GL_MODELVIEW]]);
 }
 
 void esFrustumf(GLfloat left, GLfloat right, GLfloat bottom, GLfloat top, GLfloat zNear, GLfloat zFar)
 {
-    if (gGLVersion == 1)
-        #if defined(PICASIM_MACOS)
-            glFrustum(left, right, bottom, top, zNear, zFar);
-        #else
-            glFrustumf(left, right, bottom, top, zNear, zFar);
-        #endif
-    else 
-        esMatrixFrustum(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], left, right, bottom, top, zNear, zFar);
+    esMatrixFrustum(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], left, right, bottom, top, zNear, zFar);
 }
 
 void esOrthof(GLfloat left, GLfloat right, GLfloat bottom, GLfloat top, GLfloat zNear, GLfloat zFar)
 {
-    if (gGLVersion == 1)
-        glOrthof(left, right, bottom, top, zNear, zFar);
-    else
-        esMatrixOrtho(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], left, right, bottom, top, zNear, zFar);
+    esMatrixOrtho(gMatrixStack[gModeIndex][gStackIndex[gModeIndex]], left, right, bottom, top, zNear, zFar);
 }
 
 void esSetTextureMatrix(int textureMatrixLoc)
 {
-    if (gGLVersion > 1 && textureMatrixLoc != -1)
+    if (textureMatrixLoc != -1)
     {
         GLMat44 tMatrix; esGetMatrix(tMatrix, GL_TEXTURE);
         glUniformMatrix4fv(textureMatrixLoc, 1, GL_FALSE, (GLfloat*) &tMatrix);
@@ -1079,98 +986,117 @@ void esSetTextureMatrix(int textureMatrixLoc)
 
 void esSetModelViewProjectionMatrix(int mvpMatrixLoc)
 {
-    if (gGLVersion > 1)
-    {
-        if (mvpMatrixLoc == -1)
-            return;
-        GLMat44 mvpMatrix;
-        GLMat44 mvMatrix; esGetMatrix(mvMatrix, GL_MODELVIEW);
-        GLMat44 pMatrix; esGetMatrix(pMatrix, GL_PROJECTION);
-        esMatrixMultiply(mvpMatrix, mvMatrix, pMatrix);
-        glUniformMatrix4fv(mvpMatrixLoc, 1, GL_FALSE, (GLfloat*) &mvpMatrix[0][0]);
-    }
+    if (mvpMatrixLoc == -1)
+        return;
+    GLMat44 mvpMatrix;
+    GLMat44 mvMatrix; esGetMatrix(mvMatrix, GL_MODELVIEW);
+    GLMat44 pMatrix; esGetMatrix(pMatrix, GL_PROJECTION);
+    esMatrixMultiply(mvpMatrix, mvMatrix, pMatrix);
+    glUniformMatrix4fv(mvpMatrixLoc, 1, GL_FALSE, (GLfloat*) &mvpMatrix[0][0]);
 }
 
 void esSetModelViewProjectionAndNormalMatrix(int mvpMatrixLoc, int normalMatrixLoc)
 {
-    if (gGLVersion > 1)
-    {
-        esSetModelViewProjectionMatrix(mvpMatrixLoc);
-        if (normalMatrixLoc == -1)
-            return;
+    esSetModelViewProjectionMatrix(mvpMatrixLoc);
+    if (normalMatrixLoc == -1)
+        return;
 
-        GLMat33 normalMatrix;
-        GLMat44 mvMatrix; esGetMatrix(mvMatrix, GL_MODELVIEW);
-        esMatrixCopyRotation(normalMatrix, mvMatrix);
-        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, (GLfloat*) &normalMatrix);
-    }
+    GLMat33 normalMatrix;
+    GLMat44 mvMatrix; esGetMatrix(mvMatrix, GL_MODELVIEW);
+    esMatrixCopyRotation(normalMatrix, mvMatrix);
+    glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, (GLfloat*) &normalMatrix);
 }
 
 void esSetLighting(const LightShaderInfo lightShaderInfo[5])
 {
-    if (gGLVersion > 1)
+    for (int i = 0 ; i != 5 ; ++i)
     {
-        for (int i = 0 ; i != 5 ; ++i)
+        if (lightShaderInfo[i].u_lightDir != -1)
         {
-            if (lightShaderInfo[i].u_lightDir != -1)
+            GLVec4 lightDir;
+            esVector4Copy(lightDir, gLightPos[i]);
+            float d = sqrtf(Square(lightDir[0]) + Square(lightDir[1]) + Square(lightDir[2]));
+            if (d > 0.0f)
             {
-                GLVec4 lightDir;
-                esVector4Copy(lightDir, gLightPos[i]);
-                float d = sqrtf(Square(lightDir[0]) + Square(lightDir[1]) + Square(lightDir[2]));
-                if (d > 0.0f)
-                {
-                    lightDir[0] /= d;
-                    lightDir[1] /= d;
-                    lightDir[2] /= d;
-                }
-                glUniform3fv(lightShaderInfo[i].u_lightDir, 1, lightDir);
+                lightDir[0] /= d;
+                lightDir[1] /= d;
+                lightDir[2] /= d;
             }
-            if (lightShaderInfo[i].u_lightAmbientColour != -1)
-                glUniform4fv(lightShaderInfo[i].u_lightAmbientColour, 1, gLightAmbientColour[i]);
-            if (lightShaderInfo[i].u_lightDiffuseColour != -1)
-                glUniform4fv(lightShaderInfo[i].u_lightDiffuseColour, 1, gLightDiffuseColour[i]);
-            if (lightShaderInfo[i].u_lightSpecularColour != -1)
-                glUniform4fv(lightShaderInfo[i].u_lightSpecularColour, 1, gLightSpecularColour[i]);
+            glUniform3fv(lightShaderInfo[i].u_lightDir, 1, lightDir);
         }
+        if (lightShaderInfo[i].u_lightAmbientColour != -1)
+            glUniform4fv(lightShaderInfo[i].u_lightAmbientColour, 1, gLightAmbientColour[i]);
+        if (lightShaderInfo[i].u_lightDiffuseColour != -1)
+            glUniform4fv(lightShaderInfo[i].u_lightDiffuseColour, 1, gLightDiffuseColour[i]);
+        if (lightShaderInfo[i].u_lightSpecularColour != -1)
+            glUniform4fv(lightShaderInfo[i].u_lightSpecularColour, 1, gLightSpecularColour[i]);
     }
 }
 
 
 void esSetLightPos(GLenum light, const GLVec4& lightPos)
 {
-    if (gGLVersion == 1)
+    GLMat44 mvMatrix; esGetMatrix(mvMatrix, GL_MODELVIEW);
+    esMatrixTransform(gLightPos[light - GL_LIGHT0], mvMatrix, lightPos);
+}
+
+//======================================================================================================================
+// PBR-lite model state. Default: PBR on, ambient scale 1, flat white-ish SH.
+ModelPBRState gModelPBRState = { 1, 1.0f, {{0,0,0}} };
+
+void esComputeModelPBRState(bool usePBR, float shAmbientScale,
+                            const GLfloat ambientColour[4],
+                            const GLfloat sunDiffuseColour[4],
+                            float sunAmbientFill)
+{
+    gModelPBRState.usePBR = usePBR ? 1 : 0;
+    gModelPBRState.shAmbientScale = shAmbientScale;
+
+    // Clear all 9 SH coefficients.
+    for (int i = 0; i < 9; ++i)
+        gModelPBRState.shCoeffs[i][0] = gModelPBRState.shCoeffs[i][1] = gModelPBRState.shCoeffs[i][2] = 0.0f;
+
+    // --- Constant ambient (band 0) --------------------------------------------
+    // Radiance coeff for a constant environment A is A * sqrt(4*pi) = A * 3.5449.
+    // Through evalSHIrradiance (which divides by PI) this reconstructs back to A,
+    // so with shAmbientScale == 1 the flat ambient matches the pre-PBR fill.
+    const float kConst = 3.5449077f; // sqrt(4*pi)
+    for (int c = 0; c < 3; ++c)
+        gModelPBRState.shCoeffs[0][c] += kConst * ambientColour[c];
+
+    // --- Subtle sun-direction gradient (band 1) -------------------------------
+    // View-space sun direction is light 0's already-transformed, normalised pos.
+    GLVec4 d; esVector4Copy(d, gLightPos[0]);
+    float len = sqrtf(Square(d[0]) + Square(d[1]) + Square(d[2]));
+    if (len > 1e-5f && sunAmbientFill > 0.0f)
     {
-        glLightfv(light, GL_POSITION, lightPos);
-    }
-    else
-    {
-        GLMat44 mvMatrix; esGetMatrix(mvMatrix, GL_MODELVIEW);
-        esMatrixTransform(gLightPos[light - GL_LIGHT0], mvMatrix, lightPos);
+        float dx = d[0] / len, dy = d[1] / len, dz = d[2] / len;
+        // Radiance coeffs of a soft directional fill of colour C along d:
+        //   L00 += 0.282095*C ; L1-1 += 0.488603*C*dy ; L10 += 0.488603*C*dz ; L11 += 0.488603*C*dx
+        for (int c = 0; c < 3; ++c)
+        {
+            float C = sunDiffuseColour[c] * sunAmbientFill;
+            gModelPBRState.shCoeffs[0][c] += 0.282095f * C;
+            gModelPBRState.shCoeffs[1][c] += 0.488603f * C * dy;
+            gModelPBRState.shCoeffs[2][c] += 0.488603f * C * dz;
+            gModelPBRState.shCoeffs[3][c] += 0.488603f * C * dx;
+        }
     }
 }
 
 void esSetLightDiffuseColour(GLenum light, const GLVec4& diffuseColour)
 {
-    if (gGLVersion == 1)
-        glLightfv(light, GL_DIFFUSE, diffuseColour);
-    else
-        esVector4Copy(gLightDiffuseColour[light - GL_LIGHT0], diffuseColour);
+    esVector4Copy(gLightDiffuseColour[light - GL_LIGHT0], diffuseColour);
 }
 
 void esSetLightAmbientColour(GLenum light, const GLVec4& ambientColour)
 {
-    if (gGLVersion == 1)
-        glLightfv(light, GL_AMBIENT, ambientColour);
-    else
-        esVector4Copy(gLightAmbientColour[light - GL_LIGHT0], ambientColour);
+    esVector4Copy(gLightAmbientColour[light - GL_LIGHT0], ambientColour);
 }
 
 void esSetLightSpecularColour(GLenum light, const GLVec4& specularColour)
 {
-    if (gGLVersion == 1)
-        glLightfv(light, GL_SPECULAR, specularColour);
-    else
-        esVector4Copy(gLightSpecularColour[light - GL_LIGHT0], specularColour);
+    esVector4Copy(gLightSpecularColour[light - GL_LIGHT0], specularColour);
 }
 
 //======================================================================================================================

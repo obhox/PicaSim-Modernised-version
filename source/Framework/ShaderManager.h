@@ -35,6 +35,11 @@ public:
 
     const Shader* GetShader(ShaderType type);
 
+    // Debug hot-reload: in debug builds, poll the on-disk shader sources and
+    // recompile any that have changed. No-op in release builds. Safe to call
+    // once per frame; it throttles its own file-system checks.
+    static void PollHotReload();
+
 private:
     ShaderManager(LoadingScreenHelper* loadingScreen);
     static ShaderManager* mInstance;

@@ -9,6 +9,8 @@
 #include "Graphics.h"
 #include "ShaderManager.h"
 #include "Shaders.h"
+#include "HdrRenderTarget.h"
+#include "PostProcess.h"
 #include "../Platform/S3ECompat.h"
 #include "../Platform/Window.h"
 #include "../Platform/Platform.h"
@@ -53,6 +55,10 @@ RenderManager::RenderManager(FrameworkSettings& frameworkSettings)
     mShadowSizeScale = 1.3f;
     mEnableStereoscopy = false;
     mStereoSeparation = 0.0f;
+    mHdrTarget = nullptr;
+    mPostProcess = nullptr;
+    mHdrWidth = 0;
+    mHdrHeight = 0;
 
     float lightBearing   = 0.0f;
     float lightElevation = 0.0f;
@@ -61,7 +67,44 @@ RenderManager::RenderManager(FrameworkSettings& frameworkSettings)
 
 RenderManager::~RenderManager()
 {
+    if (mPostProcess)
+    {
+        mPostProcess->Terminate();
+        delete mPostProcess;
+        mPostProcess = nullptr;
+    }
+    delete mHdrTarget;
+    mHdrTarget = nullptr;
     delete mDebugRenderer;
+}
+
+//======================================================================================================================
+bool RenderManager::EnsureHdrResources(int width, int height)
+{
+    if (width < 1 || height < 1)
+        return false;
+
+    if (!mPostProcess)
+    {
+        mPostProcess = new PostProcess();
+        mPostProcess->Init();
+    }
+    if (!mPostProcess->IsInitialised())
+        return false;   // shader compile failed - fall back to classic path
+
+    if (!mHdrTarget)
+    {
+        mHdrTarget = new HdrRenderTarget(width, height);
+        mHdrWidth = width;
+        mHdrHeight = height;
+    }
+    else if (width != mHdrWidth || height != mHdrHeight)
+    {
+        mHdrTarget->Resize(width, height);
+        mHdrWidth = width;
+        mHdrHeight = height;
+    }
+    return true;
 }
 
 
@@ -75,8 +118,7 @@ void RenderManager::Init(FrameworkSettings& frameworkSettings, LoadingScreenHelp
     // Get dimensions from IwGL
     int width =  Platform::GetDisplayWidth();
     int height = Platform::GetDisplayHeight();
-    GLint depthBits = 0;
-    glGetIntegerv( GL_DEPTH_BITS, &depthBits);
+    GLint depthBits = 0; // GL_DEPTH_BITS query removed (not available in core profile; SDL configures the depth buffer)
     TRACE_FILE_IF(1) TRACE("Screen Size : %dx%d\n", width, height);
     TRACE_FILE_IF(1) TRACE("\n");
     TRACE_FILE_IF(1) TRACE( "Vendor     : %s\n", (const char*)glGetString( GL_VENDOR ) );
@@ -133,27 +175,11 @@ void RenderManager::SetupLighting()
 
     // Jitter the light position otherwise OpenGL/Marmalade doesn't register it has changed - 
     // even though it has if the modelview matrix has changed!
-    float t = gGLVersion == 1 ? 0.001f * rand()/float(RAND_MAX) : 0.0f;
+    float t = 0.0f;
     GLfloat lightPos[] = {-mLightingDirection.x + t, -mLightingDirection.y, -mLightingDirection.z, 0.0f};
 
     // set the light position (especially) after setting the viewpoint,
     // so that it is fixed
-    if (gGLVersion == 1)
-    {
-        glEnable(GL_LIGHTING);
-
-        GLint numLights = 1;
-        glGetIntegerv(GL_MAX_LIGHTS, &numLights);
-        for (int i = 0 ; i != numLights ; ++i)
-            glDisable(GL_LIGHT0 + i);
-
-        glEnable(GL_LIGHT0);
-        if (mFrameworkSettings.mUseMultiLights)
-        {
-            for (int i = 1 ; i != 5 ; ++i)
-                glEnable(GL_LIGHT0 + i);
-        }
-    }
     esSetLightPos(GL_LIGHT0, lightPos);
     esSetLightDiffuseColour(GL_LIGHT0, diffuseColour);
     esSetLightSpecularColour(GL_LIGHT0, specularColour);
@@ -193,32 +219,16 @@ void RenderManager::SetupLighting()
         }
     }
 
-    if (gGLVersion == 1)
+    // PBR-lite: rebuild the model SH ambient (view-space) from the environment
+    // lighting. The SH ambient replaces the hemisphere fill lights for the model
+    // PBR path; the sun (light 0) remains the single direct light. Forced off in
+    // the classic (escape-hatch) path. sunAmbientFill adds a small sun-direction
+    // tint on top of the flat ambient - raise it for a stronger gradient.
     {
-        glLightf(GL_LIGHT0, GL_SPOT_EXPONENT, 0.0f);
-        glLightf(GL_LIGHT0, GL_SPOT_CUTOFF, 180.0f);
-        glLightf(GL_LIGHT0, GL_CONSTANT_ATTENUATION, 1.0f);
-        glLightf(GL_LIGHT0, GL_LINEAR_ATTENUATION, 0.0f);
-        glLightf(GL_LIGHT0, GL_QUADRATIC_ATTENUATION, 0.0f);
-        if (mFrameworkSettings.mUseMultiLights)
-        {
-            for (int i = 1 ; i != 5 ; ++i)
-            {
-                glLightf(GL_LIGHT0+i, GL_SPOT_EXPONENT, 0.0f);
-                glLightf(GL_LIGHT0+i, GL_SPOT_CUTOFF, 180.0f);
-                glLightf(GL_LIGHT0+i, GL_CONSTANT_ATTENUATION, 1.0f);
-                glLightf(GL_LIGHT0+i, GL_LINEAR_ATTENUATION, 0.0f);
-                glLightf(GL_LIGHT0+i, GL_QUADRATIC_ATTENUATION, 0.0f);
-            }
-        }
-
-        // disable the default global ambient light
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, zeros);
-        glLightModelf(GL_LIGHT_MODEL_TWO_SIDE, 0.0f);
-
-        // Disable lighting by default
-        glDisable(GL_LIGHTING);
-        glDisable(GL_COLOR_MATERIAL); // Fixes colour on aeroplane
+        bool usePBR = mFrameworkSettings.mUsePBR && !mFrameworkSettings.mClassicRendering;
+        const float sunAmbientFill = 0.25f;
+        esComputeModelPBRState(usePBR, mFrameworkSettings.mSHAmbientScale,
+                               ambientColour, diffuseColour, sunAmbientFill);
     }
 }
 
@@ -259,35 +269,37 @@ void RenderManager::RenderUpdate()
     TRACE_METHOD_ONLY(2);
     GLenum gl_error;
 
+
     glClearColor(0.0, 0.0, 0.0, 1.0);
 
     glEnable(GL_DEPTH_TEST);
     glFrontFace(GL_CCW);
     glDisable(GL_CULL_FACE);
 
-    if (gGLVersion == 1)
-    {
-        glShadeModel(GL_SMOOTH);
-
-#ifdef FOG_ENABLED
-        glEnable(GL_FOG);
-        GLfloat fogColour[4] = {0.5f, 0.5f, 0.5f, 1.0f};
-        glFogfv(GL_FOG_COLOR, fogColour);
-        glFogf(GL_FOG_START, 0.0f);
-        glFogf(GL_FOG_END, 400.0f);
-#else
-        glDisable(GL_FOG);
-#endif
-    }
-
     int w =  mFrameworkSettings.mScreenWidth;
     int h  = mFrameworkSettings.mScreenHeight;
 
     int numViewpoints = mEnableStereoscopy ? 2 : 1;
 
+    // HDR path: render the 3D scene into a floating-point target then resolve
+    // (tonemap / optional bloom / FXAA) to the default framebuffer. Overlays and
+    // text stay LDR on the default framebuffer as before. mClassicRendering (or a
+    // failed HDR setup) bypasses this and draws straight to the default FB, which
+    // is pixel-identical to the pre-HDR behaviour.
+    bool useHdr = !mFrameworkSettings.mClassicRendering && EnsureHdrResources(w, h);
+
     for (int iViewpoint = 0 ; iViewpoint != numViewpoints ; ++iViewpoint)
     {
         DisplayConfig displayConfig = GetDisplayConfig(w, h, iViewpoint, numViewpoints);
+
+        // (a) Bind the HDR target (full screen size). SetupViewport() below then
+        // scissors each viewport's sub-rect within it, so stereo halves land in
+        // the correct place. In the classic path this is a no-op and the 3D
+        // scene is rendered straight to the default framebuffer.
+        if (useHdr)
+            mHdrTarget->Bind();
+
+        // (b) Render the 3D scene.
         for (Viewports::iterator iViewport = mViewports.begin() ; iViewport != mViewports.end() ; ++iViewport)
         {
             // Viewport
@@ -337,19 +349,45 @@ void RenderManager::RenderUpdate()
             }
         }
 
+        // (c) Release the HDR target (back to the default FB + prior viewport)
+        //     and (d) resolve this viewpoint's screen rect through PostProcess.
+        if (useHdr)
+        {
+            mHdrTarget->Release();
+
+            PostSettings postSettings;
+            postSettings.bloomEnabled   = mFrameworkSettings.mBloomEnabled;
+            postSettings.bloomIntensity = mFrameworkSettings.mBloomIntensity;
+            postSettings.exposure       = mFrameworkSettings.mExposure;
+            postSettings.fxaaEnabled    = mFrameworkSettings.mFXAAEnabled;
+            postSettings.pbrTonemap     = mFrameworkSettings.mPBRTonemap;
+
+            mPostProcess->Resolve(
+                mHdrTarget->GetColorTexture(), mHdrWidth, mHdrHeight,
+                displayConfig.mLeft, displayConfig.mBottom,
+                displayConfig.mWidth, displayConfig.mHeight,
+                postSettings);
+
+            // Restore the render state the 3D pass leaves behind (PostProcess
+            // touches depth/blend/cull and the active program).
+            glEnable(GL_DEPTH_TEST);
+            glFrontFace(GL_CCW);
+            glDisable(GL_CULL_FACE);
+        }
+
+        // (e) Overlay - LDR, on the default framebuffer, over the whole screen.
         {
             DisableFog disableFog;
 
-            // Now the overlay - over the whole screen.
             glViewport( displayConfig.mLeft, displayConfig.mBottom, displayConfig.mWidth, displayConfig.mHeight );
 
             esMatrixMode(GL_PROJECTION);
             esLoadIdentity();
             esOrthof(
-                float(displayConfig.mLeft), 
-                float(displayConfig.mWidth + displayConfig.mLeft), 
-                float(displayConfig.mBottom), 
-                float(displayConfig.mHeight + displayConfig.mBottom), 
+                float(displayConfig.mLeft),
+                float(displayConfig.mWidth + displayConfig.mLeft),
+                float(displayConfig.mBottom),
+                float(displayConfig.mHeight + displayConfig.mBottom),
                 1.0f, -1.0f);
 
             esMatrixMode(GL_MODELVIEW);
@@ -415,29 +453,24 @@ void RenderManager::RenderWithoutSwap()
     glFrontFace(GL_CCW);
     glDisable(GL_CULL_FACE);
 
-    if (gGLVersion == 1)
-    {
-        glShadeModel(GL_SMOOTH);
-
-#ifdef FOG_ENABLED
-        glEnable(GL_FOG);
-        GLfloat fogColour[4] = {0.5f, 0.5f, 0.5f, 1.0f};
-        glFogfv(GL_FOG_COLOR, fogColour);
-        glFogf(GL_FOG_START, 0.0f);
-        glFogf(GL_FOG_END, 400.0f);
-#else
-        glDisable(GL_FOG);
-#endif
-    }
-
     int w =  mFrameworkSettings.mScreenWidth;
     int h  = mFrameworkSettings.mScreenHeight;
 
     int numViewpoints = mEnableStereoscopy ? 2 : 1;
 
+    // Same HDR routing as RenderUpdate() (kept in sync so the menu-backdrop 3D
+    // view matches the in-flight view). See RenderUpdate() for the rationale.
+    bool useHdr = !mFrameworkSettings.mClassicRendering && EnsureHdrResources(w, h);
+
     for (int iViewpoint = 0 ; iViewpoint != numViewpoints ; ++iViewpoint)
     {
         DisplayConfig displayConfig = GetDisplayConfig(w, h, iViewpoint, numViewpoints);
+
+        // (a) Bind HDR target for the 3D scene.
+        if (useHdr)
+            mHdrTarget->Bind();
+
+        // (b) Render the 3D scene.
         for (Viewports::iterator iViewport = mViewports.begin() ; iViewport != mViewports.end() ; ++iViewport)
         {
             // Viewport
@@ -487,6 +520,30 @@ void RenderManager::RenderWithoutSwap()
             }
         }
 
+        // (c) Release + (d) resolve.
+        if (useHdr)
+        {
+            mHdrTarget->Release();
+
+            PostSettings postSettings;
+            postSettings.bloomEnabled   = mFrameworkSettings.mBloomEnabled;
+            postSettings.bloomIntensity = mFrameworkSettings.mBloomIntensity;
+            postSettings.exposure       = mFrameworkSettings.mExposure;
+            postSettings.fxaaEnabled    = mFrameworkSettings.mFXAAEnabled;
+            postSettings.pbrTonemap     = mFrameworkSettings.mPBRTonemap;
+
+            mPostProcess->Resolve(
+                mHdrTarget->GetColorTexture(), mHdrWidth, mHdrHeight,
+                displayConfig.mLeft, displayConfig.mBottom,
+                displayConfig.mWidth, displayConfig.mHeight,
+                postSettings);
+
+            glEnable(GL_DEPTH_TEST);
+            glFrontFace(GL_CCW);
+            glDisable(GL_CULL_FACE);
+        }
+
+        // (e) Overlay - LDR, on the default framebuffer.
         {
             DisableFog disableFog;
 
@@ -736,12 +793,6 @@ void RenderManager::RenderUpdateVR(VRFrameInfo& frameInfo)
     glEnable(GL_DEPTH_TEST);
     glFrontFace(GL_CCW);
     glDisable(GL_CULL_FACE);
-
-    if (gGLVersion == 1)
-    {
-        glShadeModel(GL_SMOOTH);
-        glDisable(GL_FOG);
-    }
 
     // DEBUG: Force reset critical GL state before VR rendering
     glDepthMask(GL_TRUE);

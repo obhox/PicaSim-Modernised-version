@@ -198,19 +198,6 @@ void ButtonOverlay::RenderOverlayUpdate(int renderLevel, DisplayConfig& displayC
 
     int mvpLoc = -1;
 
-    if (gGLVersion == 1)
-    {
-        glEnable(GL_TEXTURE_2D);
-        glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-        glDisableClientState(GL_COLOR_ARRAY);
-        glEnableClientState(GL_VERTEX_ARRAY);
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        glVertexPointer(3, GL_FLOAT, 0, pts);
-        glTexCoordPointer(2, GL_FLOAT, 0, uvs);
-
-        glColor4ub(mColour[0], mColour[1], mColour[2], (GLubyte) (mAlpha * 255));
-    }
-    else
     {
         const OverlayShader* overlayShader = (OverlayShader*) ShaderManager::GetInstance().GetShader(SHADER_OVERLAY);
         overlayShader->Use();
@@ -218,10 +205,15 @@ void ButtonOverlay::RenderOverlayUpdate(int renderLevel, DisplayConfig& displayC
         // Get the variable locations
         glUniform1i(overlayShader->u_texture, 0);
 
-        glVertexAttribPointer(overlayShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, pts);
+        gStreamVBO.Bind();
+        gStreamVBO.Reserve(sizeof(pts) + sizeof(uvs));
+        size_t posOffset = gStreamVBO.Upload(pts, sizeof(pts));
+        size_t uvOffset  = gStreamVBO.Upload(uvs, sizeof(uvs));
+
+        glVertexAttribPointer(overlayShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
         glEnableVertexAttribArray(overlayShader->a_position);
 
-        glVertexAttribPointer(overlayShader->a_texCoord, 2, GL_FLOAT, GL_FALSE, 0, uvs);
+        glVertexAttribPointer(overlayShader->a_texCoord, 2, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)uvOffset);
         glEnableVertexAttribArray(overlayShader->a_texCoord);
 
         glUniform4f(overlayShader->u_colour, mColour[0]/255.0f, mColour[1]/255.0f, mColour[2]/255.0f, mAlpha);
@@ -233,17 +225,11 @@ void ButtonOverlay::RenderOverlayUpdate(int renderLevel, DisplayConfig& displayC
 
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-    if (gGLVersion == 1)
-    {
-        glDisableClientState(GL_VERTEX_ARRAY);
-        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-        glDisable(GL_TEXTURE_2D);
-    }
-    else
     {
         const OverlayShader* overlayShader = (OverlayShader*) ShaderManager::GetInstance().GetShader(SHADER_OVERLAY);
         glDisableVertexAttribArray(overlayShader->a_position);
         glDisableVertexAttribArray(overlayShader->a_texCoord);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 }
 

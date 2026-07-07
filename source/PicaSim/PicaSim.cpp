@@ -1,5 +1,6 @@
 #include "PicaSim.h"
 
+#include "ShaderManager.h"
 #include "HumanController.h"
 #include "ConnectionListener.h"
 #include "AeroplaneGraphics.h"
@@ -637,6 +638,9 @@ void PicaSim::ShowHelpOverlays()
 //======================================================================================================================
 PicaSim::UpdateResult PicaSim::Update(int64 deltaTimeMs)
 {
+    // Debug-only: recompile shaders edited on disk this frame (no-op in release).
+    ShaderManager::PollHotReload();
+
     UpdateJoystick(mGameSettings.mOptions.mJoystickID);
 
     float deltaTime = deltaTimeMs * 0.001f;
@@ -1148,9 +1152,10 @@ PicaSim::UpdateResult PicaSim::Update(int64 deltaTimeMs)
 
     Transform cameraTM;
     cameraTM = mViewport->GetCamera()->GetTransform();
-    // Adjust the clipping
-    GLint depthBits = 0;
-    glGetIntegerv( GL_DEPTH_BITS, &depthBits);
+    // Adjust the clipping. GL_DEPTH_BITS is not queryable in a core profile;
+    // the context is created with a 24-bit depth buffer (SDL_GL_DEPTH_SIZE = 24
+    // in Window.cpp), so use that value to preserve the near-clip behaviour.
+    GLint depthBits = 24;
     float cameraTerrainZ = Environment::GetInstance().GetTerrain().GetTerrainHeight(cameraTM.GetTrans().x, cameraTM.GetTrans().y, false);
     float cameraHeight = cameraTM.GetTrans().z - cameraTerrainZ;
     float maxClipDist = depthBits < 24 ? 1.0f : 0.1f;

@@ -96,6 +96,7 @@ private:
         bool mFullscreen;
         int mGlMajorVersion;
         int mGlMinorVersion;
+        unsigned int mGlobalVAO = 0;
         long mFrameCounter = 0;
         bool mScreenshotPending = false;
         std::string mScreenshotPath;

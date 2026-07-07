@@ -1,6 +1,78 @@
 #include "RenderModel.h"
 #include "ShaderManager.h"
 #include "Shaders.h"
+#include "tinyxml.h"
+
+#include <map>
+
+//======================================================================================================================
+// PBR-lite material handling.
+//
+// Per component we derive a roughness/metallic from the AC3D material and,
+// optionally, override it via a "Materials.xml" sitting next to the model file:
+//
+//   <Materials>
+//     <Material name="ac3dMatName" roughness="0.4" metallic="0.0" normalMap="tex.png"/>
+//   </Materials>
+//
+// Absent file / missing entry => the AC3D-derived defaults are used. Matching is
+// by AC3D material name. normalMap is parsed and stored for later use (the shader
+// TBN path is not yet wired - no shipped aircraft currently reference one, so the
+// vertex format is unchanged for all existing models).
+
+struct PBRMaterialOverride
+{
+    PBRMaterialOverride() : roughness(0.6f), metallic(0.0f), hasRoughness(false), hasMetallic(false) {}
+    float roughness;
+    float metallic;
+    bool  hasRoughness;
+    bool  hasMetallic;
+    std::string normalMap;
+};
+typedef std::map<std::string, PBRMaterialOverride> PBRMaterialOverrides;
+
+//======================================================================================================================
+// Maps an AC3D material to a PBR roughness. AC3D shininess is nominally 0..128;
+// a shinier material is smoother, so roughness = 1 - shininess/128 (clamped).
+static float RoughnessFromShininess(float shininess)
+{
+    return ClampToRange(1.0f - shininess / 128.0f, 0.2f, 1.0f);
+}
+
+//======================================================================================================================
+static void LoadMaterialsXml(const std::string& modelFile, PBRMaterialOverrides& out)
+{
+    std::string dir;
+    std::string::size_type lastSlash = modelFile.find_last_of("/");
+    if (lastSlash != std::string::npos)
+        dir = modelFile.substr(0, lastSlash + 1);
+    std::string path = dir + "Materials.xml";
+
+    TiXmlDocument doc(path.c_str());
+    if (!doc.LoadFile())
+        return; // absent / unreadable -> AC3D-derived defaults are used
+
+    TiXmlHandle docHandle(&doc);
+    TiXmlElement* root = docHandle.FirstChild("Materials").ToElement();
+    if (!root)
+        return;
+
+    for (TiXmlElement* e = root->FirstChildElement("Material"); e; e = e->NextSiblingElement("Material"))
+    {
+        const char* name = e->Attribute("name");
+        if (!name)
+            continue;
+        PBRMaterialOverride ov;
+        if (e->QueryFloatAttribute("roughness", &ov.roughness) == TIXML_SUCCESS)
+            ov.hasRoughness = true;
+        if (e->QueryFloatAttribute("metallic", &ov.metallic) == TIXML_SUCCESS)
+            ov.hasMetallic = true;
+        const char* nm = e->Attribute("normalMap");
+        if (nm)
+            ov.normalMap = nm;
+        out[name] = ov;
+    }
+}
 
 //======================================================================================================================
 RenderModel::RenderModel()
@@ -216,6 +288,10 @@ void RenderModel::Init(
 
     mCullBackFaces = cullBackFaces;
 
+    // Optional per-material PBR overrides (roughness/metallic/normalMap).
+    PBRMaterialOverrides pbrOverrides;
+    LoadMaterialsXml(modelFile, pbrOverrides);
+
     for(size_t i = 0; i != model.mObject.mObjects.size(); i++)
     {
         // Get the current object that we are displaying
@@ -312,6 +388,24 @@ void RenderModel::Init(
 
                 if (degenerate)
                     continue;
+
+                // PBR-lite: derive this component's roughness/metallic from the
+                // surface material (AC3D shininess), applying any Materials.xml
+                // override. Components group surfaces by texture, so materials are
+                // usually consistent within one; last surface wins otherwise.
+                {
+                    const ACMaterial& surfMat = model.mMaterials[surface.mat];
+                    float rough = RoughnessFromShininess(surfMat.shininess);
+                    float metal = 0.0f;
+                    PBRMaterialOverrides::const_iterator ov = pbrOverrides.find(surfMat.name);
+                    if (ov != pbrOverrides.end())
+                    {
+                        if (ov->second.hasRoughness) rough = ov->second.roughness;
+                        if (ov->second.hasMetallic)  metal = ov->second.metallic;
+                    }
+                    component->mRoughness = rough;
+                    component->mMetallic  = metal;
+                }
 
                 size_t numTriangles = surface.vertref.size() - 2;
                 if (component->mTexture)
@@ -542,14 +636,6 @@ void RenderModel::Render(const Vector4* colour, bool forceColour, bool separateS
     // the first time without specular, and the second time over the top. This is because ES 1 
     // does the lighting and then multiplies the result by the texture colour. This means a black texture kills specular.
 
-    GLVec4 specularColour;
-    if (gGLVersion == 1 && separateSpecular)
-    {
-        GLfloat zeros[] = {0, 0, 0, 0};
-        glGetLightfv(GL_LIGHT0, GL_SPECULAR, specularColour);
-        glLightfv(GL_LIGHT0, GL_SPECULAR, zeros);
-    }
-
     Vector4 col(1, 1, 1, 0);
 
     int index = 0;
@@ -584,40 +670,6 @@ void RenderModel::Render(const Vector4* colour, bool forceColour, bool separateS
         esPopMatrix();
     }
 
-    if (gGLVersion == 1 && separateSpecular)
-    {
-        glLightfv(GL_LIGHT0, GL_SPECULAR, specularColour);
-    }
-
-
-    if (gGLVersion == 1 && separateSpecular)
-    {
-        mDoingSeparateSpecularPass = true;
-        glDisable(GL_LIGHT1);
-        glDisable(GL_LIGHT2);
-        glDisable(GL_LIGHT3);
-        glDisable(GL_LIGHT4);
-
-        GLfloat zeros[] = {0, 0, 0, 0};
-        GLVec4 diffuseColour;
-        GLVec4 ambientColour;
-        glGetLightfv(GL_LIGHT0, GL_DIFFUSE, diffuseColour);
-        glGetLightfv(GL_LIGHT0, GL_AMBIENT, ambientColour);
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, zeros);
-        glLightfv(GL_LIGHT0, GL_AMBIENT, zeros);
-
-        Vector4 col(1.0f, 1.0f, 1.0f, -1.0f);
-        Render(&col, true, false);
-
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuseColour);
-        glLightfv(GL_LIGHT0, GL_AMBIENT, ambientColour);
-
-        glEnable(GL_LIGHT1);
-        glEnable(GL_LIGHT2);
-        glEnable(GL_LIGHT3);
-        glEnable(GL_LIGHT4);
-        mDoingSeparateSpecularPass = false;
-    }
 }
 
 //======================================================================================================================
@@ -672,35 +724,6 @@ bool RenderModel::PartRenderPre(const Vector4* colour, bool forceColour, ShaderP
     float specularAmount2 = 0.5f;
     float specularExponent2 = 20.0f;
 
-    if (gGLVersion == 1)
-    {
-        if (texture)
-        {
-            glEnable(GL_TEXTURE_2D);
-            glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-            glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-        }
-        else
-        {
-            glDisable(GL_TEXTURE_2D);
-            if (!colour)
-                glEnableClientState(GL_COLOR_ARRAY);
-            else
-                glColor4f(colour->x, colour->y, colour->z, colour->w);
-        }
-
-        glEnableClientState(GL_VERTEX_ARRAY);
-        glEnableClientState(GL_NORMAL_ARRAY);
-
-        GLfloat s[] = {specularAmount1, specularAmount1, specularAmount1, 1.0f};
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, s);
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, specularExponent1); // smooth surface = large numbers = small highlights
-
-        // Overwrites the actual material for ambient and diffuse, front and back (no glColorMaterial in ogl es)
-        if (!forceColour)
-            glEnable(GL_COLOR_MATERIAL);
-    }
-    else
     {
         if (texture)
         {
@@ -760,22 +783,6 @@ bool RenderModel::PartRenderPre(const Vector4* colour, bool forceColour, ShaderP
         start = 0;
     }
 
-    if (gGLVersion == 1)
-    {
-        glVertexPointer(3, GL_FLOAT, elementSize, (GLvoid*) start);
-        glNormalPointer(GL_FLOAT, elementSize, (GLvoid*) (start + sizeof(Vector3)));
-        if (texture)
-        {
-            glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-            glTexCoordPointer(2, GL_FLOAT, elementSize, (GLvoid*) (start + sizeof(Vector3) + sizeof(Vector3)));
-        }
-        else
-        {
-            if (!colour)
-                glColorPointer(4, GL_FLOAT, elementSize, (GLvoid*) (start + sizeof(Vector3) + sizeof(Vector3)));
-        }
-    }
-    else
     {
         glVertexAttribPointer(positionLoc, 3, GL_FLOAT, GL_FALSE, elementSize, (GLvoid*) start);
         glEnableVertexAttribArray(positionLoc);
@@ -820,6 +827,16 @@ bool RenderModel::PartRenderPre(const Vector4* colour, bool forceColour, ShaderP
                 glUniform4f((*lightShaderInfo)[i].u_lightSpecularColour, 0.0f, 0.0f, 0.0f, 1.0f);
             }
         }
+
+        // PBR-lite uniforms. usePBR is forced off for the flat-colour passes
+        // (shadow / forceColour) so those keep using the legacy Phong branch.
+        const ModelShader* ms = texture ? (const ModelShader*) texturedModelShader : modelShader;
+        int usePBR = (gModelPBRState.usePBR && !forceColour) ? 1 : 0;
+        if (ms->u_usePBR >= 0)         glUniform1f(ms->u_usePBR, (float) usePBR);
+        if (ms->u_roughness >= 0)      glUniform1f(ms->u_roughness, component.mRoughness);
+        if (ms->u_metallic >= 0)       glUniform1f(ms->u_metallic, component.mMetallic);
+        if (ms->u_shAmbientScale >= 0) glUniform1f(ms->u_shAmbientScale, gModelPBRState.shAmbientScale);
+        if (ms->u_shCoeffs >= 0)       glUniform3fv(ms->u_shCoeffs, 9, &gModelPBRState.shCoeffs[0][0]);
     }
     return true;
 }
@@ -831,11 +848,6 @@ void RenderModel::PartRender(const Vector4* colour, bool forceColour, ShaderProg
 
     if (colour)
     {
-        if (gGLVersion == 1)
-        {
-            glColor4f(colour->x, colour->y, colour->z, colour->w);
-        }
-        else
         {
             glVertexAttrib4fv(shaderInfo.colourLoc, &colour->x);
             glDisableVertexAttribArray(shaderInfo.colourLoc);
@@ -855,15 +867,6 @@ void RenderModel::PartRenderPost(const Vector4* colour, bool forceColour, int co
 
     Texture* texture = forceColour ? 0 : component.mTexture;
 
-    if (gGLVersion == 1)
-    {
-        glDisableClientState(GL_VERTEX_ARRAY);
-        glDisableClientState(GL_NORMAL_ARRAY);
-        glDisableClientState(GL_COLOR_ARRAY);
-        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-        glDisable(GL_TEXTURE_2D);
-    }
-    else // gGLVersion == 2
     {
         // Get shader attribute locations (safe to call glDisableVertexAttribArray on any location)
         const TexturedModelShader* texturedModelShader =
@@ -884,11 +887,6 @@ void RenderModel::PartRenderPost(const Vector4* colour, bool forceColour, int co
 
         // Unbind shader program
         glUseProgram(0);
-    }
-
-    if (texture)
-    {
-        glDisable(GL_TEXTURE_2D);
     }
 
   if (component.mVertexBuffer)

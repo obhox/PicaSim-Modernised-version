@@ -37,8 +37,7 @@ void SkyGrid::RenderUpdate(class Viewport* viewport, int renderLevel)
     DisableDepthMask disableDepthMask;
 
     const SimpleShader* simpleShader = (SimpleShader*) ShaderManager::GetInstance().GetShader(SHADER_SIMPLE);
-    if (gGLVersion == 2)
-        simpleShader->Use();
+    simpleShader->Use();
 
     esPushMatrix();
 
@@ -52,19 +51,15 @@ void SkyGrid::RenderUpdate(class Viewport* viewport, int renderLevel)
     size_t numLinePts = mLinePoints.size();
     if (numLinePts)
     {
-        if (gGLVersion == 1)
         {
-            glEnableClientState(GL_VERTEX_ARRAY);
-            glEnableClientState(GL_COLOR_ARRAY);
-            glVertexPointer(3, GL_FLOAT, 0, &mLinePoints[0].x);
-            glColorPointer(4, GL_FLOAT, 0, &mLinePointColours[0].x);
-        }
-        else
-        {
+            gStreamVBO.Bind();
+            gStreamVBO.Reserve(numLinePts * sizeof(Vector3) + numLinePts * sizeof(Vector4));
+            size_t posOffset    = gStreamVBO.Upload(&mLinePoints[0].x, numLinePts * sizeof(Vector3));
+            size_t colourOffset = gStreamVBO.Upload(&mLinePointColours[0].x, numLinePts * sizeof(Vector4));
             glEnableVertexAttribArray(simpleShader->a_position);
             glEnableVertexAttribArray(simpleShader->a_colour);
-            glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, &mLinePoints[0].x);
-            glVertexAttribPointer(simpleShader->a_colour, 4, GL_FLOAT, GL_FALSE, 0, &mLinePointColours[0].x);
+            glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
+            glVertexAttribPointer(simpleShader->a_colour, 4, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)colourOffset);
         }
         glDrawArrays(GL_LINES, 0, numLinePts);
     }
@@ -76,33 +71,22 @@ void SkyGrid::RenderUpdate(class Viewport* viewport, int renderLevel)
         size_t numPts = linestrip.size();
         if (numPts)
         {
-            if (gGLVersion == 1)
             {
-                glEnableClientState(GL_VERTEX_ARRAY);
-                glDisableClientState(GL_COLOR_ARRAY);
-                glVertexPointer(3, GL_FLOAT, 0, &linestrip[0].x);
-                glColor4f(mLineStripColours[iStrip].x, mLineStripColours[iStrip].y, mLineStripColours[iStrip].z, mLineStripColours[iStrip].w);
-            }
-            else
-            {
+                gStreamVBO.Bind();
+                size_t posOffset = gStreamVBO.Upload(&linestrip[0].x, numPts * sizeof(Vector3));
                 glEnableVertexAttribArray(simpleShader->a_position);
                 glDisableVertexAttribArray(simpleShader->a_colour);
-                glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, &linestrip[0].x);
+                glVertexAttribPointer(simpleShader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
                 glVertexAttrib4fv(simpleShader->a_colour, &mLineStripColours[iStrip].x);
             }
             glDrawArrays(GL_LINE_STRIP, 0, linestrip.size());
         }
     }
 
-    if (gGLVersion == 1)
-    {
-        glDisableClientState(GL_VERTEX_ARRAY);
-        glDisableClientState(GL_COLOR_ARRAY);
-    }
-    else
     {
         glDisableVertexAttribArray(simpleShader->a_position);
         glDisableVertexAttribArray(simpleShader->a_colour);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
     esPopMatrix();

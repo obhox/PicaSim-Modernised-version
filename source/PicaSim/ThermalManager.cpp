@@ -431,8 +431,6 @@ void ThermalManager::RenderUpdate(class Viewport* viewport, int renderLevel)
                 mRenderModel[1].PartRenderPost(0, false, 0);
             }
         }
-
-        glDisable(GL_COLOR_MATERIAL);
     }
 
     if (gs.mOptions.mDrawThermalWindField)

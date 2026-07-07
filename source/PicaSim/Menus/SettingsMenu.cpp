@@ -796,6 +796,9 @@ void SettingsMenu::RenderOptions1Tab()
             SettingsWidgets::SliderInt(TXT(PS_PROJECTEDSHADOWDETAIL), options.mProjectedShadowDetail, 7, 10);
             SettingsWidgets::Checkbox(TXT(PS_USE16BIT), options.m16BitTextures);
             SettingsWidgets::Checkbox(TXT(PS_SEPARATESPECULAR), options.mSeparateSpecular);
+            // Classic rendering: skip the HDR/post-process pipeline and draw the
+            // scene straight to the screen (identical to the pre-HDR output).
+            SettingsWidgets::Checkbox("Classic rendering", options.mFrameworkSettings.mClassicRendering);
             SettingsWidgets::SliderFloat(TXT(PS_AMBIENTLIGHTINGSCALE), options.mAmbientLightingScale, 0.0f, 5.0f);
             SettingsWidgets::SliderFloat(TXT(PS_DIFFUSELIGHTINGSCALE), options.mDiffuseLightingScale, 0.0f, 5.0f);
             SettingsWidgets::SliderInt(TXT(PS_TERRAINTEXTUREDETAIL), options.mBasicTextureDetail, 8, 10);
