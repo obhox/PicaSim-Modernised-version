@@ -1,0 +1,32 @@
+<ChallengeSettings
+  mTitle="Drone Precision Drill"
+  mInfo="Fly the Beginner Quad accurately through the small gates around the pad. Small gates reward smooth, precise control - great for learning to hover and reposition."
+  mThumbnail="SystemSettings/Thumbnails/ArduCopter.jpg"
+  mChallengeMode="1"
+  mChallengeID="200"
+  mReferenceTime="60"
+  mPreparationTime="20"
+  mThermalDensityOverride="0"
+  mWindSpeedOverride="0.2"
+  mAllowAeroplaneSettings="0"
+  mAllowWindStrengthSetting="0"
+  mAllowEnvironmentSettings="0"
+  mAeroplaneSettingsFile="SystemSettings/Aeroplane/BeginnerQuad.xml"
+  mEnvironmentSettingsFile="SystemSettings/Environment/BeginnerField.xml"
+  mLightingSettingsFile="SystemSettings/Lighting/Sunny.xml"
+  mDefaultToChaseView="1"
+/>
+
+<Gates>
+  <Gate mID="0" mType="1" mDraw1="1" mPos1X="-230" mPos1Y="264.5" mPos1Z="0" mRadius="2.5" mHeight="5" />
+  <Gate mID="1" mType="1" mDraw1="1" mPos1X="-245" mPos1Y="250"   mPos1Z="0" mRadius="2.5" mHeight="5" />
+  <Gate mID="2" mType="1" mDraw1="1" mPos1X="-245" mPos1Y="279"   mPos1Z="0" mRadius="2.5" mHeight="5" />
+</Gates>
+
+<Checkpoints mCheckpointForTimer="0">
+  <Checkpoint gateID="0"/>
+  <Checkpoint gateID="1"/>
+  <Checkpoint gateID="0"/>
+  <Checkpoint gateID="2"/>
+  <Checkpoint gateID="0"/>
+</Checkpoints>

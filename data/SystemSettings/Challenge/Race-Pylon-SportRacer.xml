@@ -1,0 +1,37 @@
+<ChallengeSettings
+  mTitle="Pylon Race"
+  mInfo="Three laps of the triangular pylon course in the Sport Racer. Round each pylon at any height and go for the fastest time."
+  mThumbnail="SystemSettings/Thumbnails/GeeBee.jpg"
+  mChallengeMode="1"
+  mChallengeID="202"
+  mReferenceTime="90"
+  mPreparationTime="30"
+  mThermalDensityOverride="0"
+  mWindSpeedOverride="1.0"
+  mAllowAeroplaneSettings="0"
+  mAllowWindStrengthSetting="0"
+  mAllowEnvironmentSettings="0"
+  mAeroplaneSettingsFile="SystemSettings/Aeroplane/SportRacer.xml"
+  mEnvironmentSettingsFile="SystemSettings/Environment/BeginnerField.xml"
+  mLightingSettingsFile="SystemSettings/Lighting/Sunny.xml"
+  mDefaultToChaseView="1"
+/>
+
+<Gates>
+  <Gate mID="0" mType="1" mDraw1="1" mPos1X="-260" mPos1Y="205" mPos1Z="0" mRadius="8.0" />
+  <Gate mID="1" mType="1" mDraw1="1" mPos1X="-260" mPos1Y="325" mPos1Z="0" mRadius="8.0" />
+  <Gate mID="2" mType="1" mDraw1="1" mPos1X="-160" mPos1Y="265" mPos1Z="0" mRadius="8.0" />
+</Gates>
+
+<Checkpoints mCheckpointForTimer="0">
+  <Checkpoint gateID="0"/>
+  <Checkpoint gateID="1"/>
+  <Checkpoint gateID="2"/>
+  <Checkpoint gateID="0"/>
+  <Checkpoint gateID="1"/>
+  <Checkpoint gateID="2"/>
+  <Checkpoint gateID="0"/>
+  <Checkpoint gateID="1"/>
+  <Checkpoint gateID="2"/>
+  <Checkpoint gateID="0"/>
+</Checkpoints>

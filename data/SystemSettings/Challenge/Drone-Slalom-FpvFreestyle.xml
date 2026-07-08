@@ -1,0 +1,38 @@
+<ChallengeSettings
+  mTitle="FPV Gate Slalom"
+  mInfo="Rip the FPV Freestyle quad through the slalom gates as fast as you can. Acro mode, low and fast - just like real FPV racing."
+  mThumbnail="SystemSettings/Thumbnails/Wasp.jpg"
+  mChallengeMode="1"
+  mChallengeID="201"
+  mReferenceTime="70"
+  mPreparationTime="20"
+  mThermalDensityOverride="0"
+  mWindSpeedOverride="0.6"
+  mAllowAeroplaneSettings="0"
+  mAllowWindStrengthSetting="0"
+  mAllowEnvironmentSettings="0"
+  mAeroplaneSettingsFile="SystemSettings/Aeroplane/FpvFreestyle.xml"
+  mEnvironmentSettingsFile="SystemSettings/Environment/DronePracticeArena.xml"
+  mLightingSettingsFile="SystemSettings/Lighting/Sunny.xml"
+  mDefaultToChaseView="1"
+/>
+
+<Gates>
+  <Gate mID="0" mType="1" mDraw1="1" mPos1X="-235" mPos1Y="255" mPos1Z="0" mRadius="3.5" mHeight="7" />
+  <Gate mID="1" mType="1" mDraw1="1" mPos1X="-255" mPos1Y="278" mPos1Z="0" mRadius="3.5" mHeight="7" />
+  <Gate mID="2" mType="1" mDraw1="1" mPos1X="-275" mPos1Y="252" mPos1Z="0" mRadius="3.5" mHeight="7" />
+  <Gate mID="3" mType="1" mDraw1="1" mPos1X="-295" mPos1Y="280" mPos1Z="0" mRadius="3.5" mHeight="7" />
+  <Gate mID="4" mType="1" mDraw1="1" mPos1X="-315" mPos1Y="258" mPos1Z="0" mRadius="3.5" mHeight="7" />
+</Gates>
+
+<Checkpoints mCheckpointForTimer="0">
+  <Checkpoint gateID="0"/>
+  <Checkpoint gateID="1"/>
+  <Checkpoint gateID="2"/>
+  <Checkpoint gateID="3"/>
+  <Checkpoint gateID="4"/>
+  <Checkpoint gateID="3"/>
+  <Checkpoint gateID="2"/>
+  <Checkpoint gateID="1"/>
+  <Checkpoint gateID="0"/>
+</Checkpoints>

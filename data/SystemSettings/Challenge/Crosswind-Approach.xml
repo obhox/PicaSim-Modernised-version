@@ -1,0 +1,26 @@
+<ChallengeSettings
+  mTitle="Crosswind Approach"
+  mInfo="Fly a crosswind approach in the Powered Trainer and bring it down in the target zone on the runway. Crab into the wind, then straighten up to touch down on line."
+  mThumbnail="SystemSettings/Thumbnails/AcroBat.jpg"
+  mChallengeMode="1"
+  mChallengeID="204"
+  mReferenceTime="60"
+  mPreparationTime="20"
+  mThermalDensityOverride="0"
+  mWindSpeedOverride="6.0"
+  mAllowAeroplaneSettings="0"
+  mAllowWindStrengthSetting="0"
+  mAllowEnvironmentSettings="0"
+  mAeroplaneSettingsFile="SystemSettings/Aeroplane/PoweredTrainer.xml"
+  mEnvironmentSettingsFile="SystemSettings/Environment/CrosswindField.xml"
+  mLightingSettingsFile="SystemSettings/Lighting/Sunny.xml"
+  mDefaultToChaseView="1"
+/>
+
+<Gates>
+  <Gate mID="0" mType="1" mDraw1="1" mPos1X="-246" mPos1Y="262" mPos1Z="0" mRadius="10.0" mHeight="4" />
+</Gates>
+
+<Checkpoints mCheckpointForTimer="0">
+  <Checkpoint gateID="0"/>
+</Checkpoints>

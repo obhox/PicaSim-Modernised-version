@@ -1,0 +1,26 @@
+<ChallengeSettings
+  mTitle="Deadstick Spot Landing"
+  mInfo="The engine is dead - glide the plane down and touch down in the target zone on the runway. Manage your energy: too high or too fast and you'll overshoot."
+  mThumbnail="SystemSettings/Thumbnails/AcroBat.jpg"
+  mChallengeMode="1"
+  mChallengeID="203"
+  mReferenceTime="40"
+  mPreparationTime="10"
+  mThermalDensityOverride="0"
+  mWindSpeedOverride="1.0"
+  mAllowAeroplaneSettings="0"
+  mAllowWindStrengthSetting="0"
+  mAllowEnvironmentSettings="0"
+  mAeroplaneSettingsFile="SystemSettings/Aeroplane/DeadstickTrainer.xml"
+  mEnvironmentSettingsFile="SystemSettings/Environment/BeginnerField.xml"
+  mLightingSettingsFile="SystemSettings/Lighting/Sunny.xml"
+  mDefaultToChaseView="1"
+/>
+
+<Gates>
+  <Gate mID="0" mType="1" mDraw1="1" mPos1X="-246" mPos1Y="262" mPos1Z="0" mRadius="12.0" mHeight="4" />
+</Gates>
+
+<Checkpoints mCheckpointForTimer="0">
+  <Checkpoint gateID="0"/>
+</Checkpoints>

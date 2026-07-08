@@ -1,0 +1,96 @@
+<!--
+  Cine Drone - heavy, ultra-smooth camera/GPS-style drone. Full-size Wasp mesh,
+  heavy payload and slow, gentle stabilisation for smooth cinematic moves. Always
+  self-levelling with altitude hold - point it and it drifts smoothly, holding height.
+-->
+
+<Misc launchOffsetX="2.0" launchOffsetY="0.0" launchOffsetZ="0.2" launchSpeed="0.0" />
+<Physics>
+  <Dynamics friction="1.0" frictionScaleX="1" frictionScaleY="1" frictionScaleZ="1" />
+
+  <Aerodynamics>
+    <PropellerEngine
+      name="FL"
+      positionX="0.159" positionY="0.159" positionZ="0.04" rotationY="-90.0"
+      numBlades="2" numRings="4" radius="0.127" pitch="0.114" bladeChord="0.012"
+      CL0="0.5" CLPerDegree="0.1" CD0="0.1" CDInducedMultiplier="2.0" stallAngle="15"
+      inertia="0.0004" maxTorque="0.8" maxRPM="-7000" minRPM="0" frictionTorque="0.25"
+      transitionalLiftAmount="0.07" transitionalLiftSpeed="3.0"
+      controlExp="0.5" controlRate="25"
+      gyroName0="Pitch" controlPerGyro0="1"
+      gyroName1="Roll"  controlPerGyro1="-1"
+      gyroName2="Yaw"   controlPerGyro2="-1"
+      gyroName3="Throttle" controlPerGyro3="1"
+      audioFile="SystemData/Audio/Motor22050Mono.raw" audioSampleRate="22050"
+      audioRadius="0.25" audioMinVolume="0" audioMaxVolume="1" audioMinFreqScale="0.2" audioMaxFreqScale="1.8"
+      colourX="0.1" colourY="0.1" colourZ="0.1" colourW="0.1" />
+    <PropellerEngine name="FR" copy="FL" positionY="-0.159" maxRPM="7000" controlPerGyro1="1" controlPerGyro2="1" />
+    <PropellerEngine name="BL" copy="FL" positionX="-0.159" maxRPM="7000" controlPerGyro0="-1" controlPerGyro2="1" colourX="0.9" colourY="0.9" colourZ="0.9" />
+    <PropellerEngine name="BR" copy="FL" positionX="-0.159" positionY="-0.159" controlPerGyro0="-1" controlPerGyro1="1" colourX="0.9" colourY="0.9" colourZ="0.9" />
+
+    <Fuselage name="Payload" mass="0.7" positionX="0.0" positionY="0.0" positionZ="0.01"
+      extentsX="0.12" extentsY="0.12" extentsZ="0.09" CDX="1" CDY="1" CDZ="1" render="false" />
+    <Fuselage name="Frame1" mass="0.18" positionX="0.0" positionY="0.0" positionZ="0.0" yaw="45"
+      extentsX="0.5" extentsY="0.05" extentsZ="0.01" CDX="1" CDY="1" CDZ="1" render="false" />
+    <Fuselage name="Frame2" mass="0.18" positionX="0.0" positionY="0.0" positionZ="0.0" yaw="-45"
+      extentsX="0.5" extentsY="0.05" extentsZ="0.01" CDX="1" CDY="1" CDZ="1" render="false" />
+
+    <Wing name="FwdBack" aerofoil="SystemData/Aerofoils/Symmetric/NACA0009" numSections="1" mass="0.0"
+      positionX="0.0" positionY="-0.05" positionZ="0.0" extentsX="0.1" extentsY="0.1" extentsZ="0.01" wingAspectRatio="1.0" render="true" />
+    <Wing name="BackFwd" aerofoil="SystemData/Aerofoils/Symmetric/NACA0009" numSections="1" mass="0.0"
+      positionX="0.0" positionY="0.05" positionZ="0.0" extentsX="0.1" extentsY="0.1" extentsZ="0.01" yaw="180" wingAspectRatio="1.0" render="true" />
+    <Wing name="LeftRight" aerofoil="SystemData/Aerofoils/Symmetric/NACA0009" numSections="1" mass="0.0"
+      positionX="0.05" positionY="0.0" positionZ="0.0" yaw="90" extentsX="0.1" extentsY="0.1" extentsZ="0.01" wingAspectRatio="1.0" render="true" />
+    <Wing name="RightLeft" aerofoil="SystemData/Aerofoils/Symmetric/NACA0009" numSections="1" mass="0.0"
+      positionX="-0.05" positionY="0.0" positionZ="0.0" yaw="-90" extentsX="0.1" extentsY="0.1" extentsZ="0.01" wingAspectRatio="1.0" render="true" />
+  </Aerodynamics>
+
+  <Gyros>
+    <Gyro name="Yaw" axisX="0" axisY="0" axisZ="1" gain="0.04" initialMode="axis" rotationRatePerChannel2="5" />
+    <Gyro name="Throttle" type="height" axisX="0" axisY="0" axisZ="0" gain="1.0" initialMode="stabilisedHeight"
+      passThroughPerChannel3="1" heightRatePerChannel3="3.5" />
+    <Gyro name="Roll" axisX="1" axisY="0" axisZ="0" gain="0.25" channelForMode="6"
+      anglePerChannel0="15" rotationRatePerChannel0="-3" speedPerChannel0="6" tiltPerSpeed="10" maxTilt="18" />
+    <Gyro name="Pitch" axisX="0" axisY="1" axisZ="0" gain="0.25" channelForMode="6"
+      anglePerChannel1="15" rotationRatePerChannel1="-3" speedPerChannel1="6" tiltPerSpeed="10" maxTilt="18" />
+  </Gyros>
+
+  <Geometry>
+    <Shape type="box" name="FL" mass="0.1" positionX="0.159" positionY="0.159" positionZ="0.02"
+      extentsX="0.02" extentsY="0.02" extentsZ="0.04"
+      colourTopX="0.1" colourTopY="0.1" colourTopZ="0.1" colourSidesX="0.1" colourSidesY="0.1" colourSidesZ="0.1" colourBottomX="0.1" colourBottomY="0.1" colourBottomZ="0.1" render="true" />
+    <Shape type="box" name="FR" mass="0.1" positionX="0.159" positionY="-0.159" positionZ="0.02"
+      extentsX="0.02" extentsY="0.02" extentsZ="0.04"
+      colourTopX="0.1" colourTopY="0.1" colourTopZ="0.1" colourSidesX="0.1" colourSidesY="0.1" colourSidesZ="0.1" colourBottomX="0.1" colourBottomY="0.1" colourBottomZ="0.1" render="true" />
+    <Shape type="box" name="BL" mass="0.1" positionX="-0.159" positionY="0.159" positionZ="0.02"
+      extentsX="0.02" extentsY="0.02" extentsZ="0.04"
+      colourTopX="0.9" colourTopY="0.9" colourTopZ="0.9" colourSidesX="0.9" colourSidesY="0.9" colourSidesZ="0.9" colourBottomX="0.9" colourBottomY="0.9" colourBottomZ="0.9" render="true" />
+    <Shape type="box" name="BR" mass="0.1" positionX="-0.159" positionY="-0.159" positionZ="0.02"
+      extentsX="0.02" extentsY="0.02" extentsZ="0.04"
+      colourTopX="0.9" colourTopY="0.9" colourTopZ="0.9" colourSidesX="0.9" colourSidesY="0.9" colourSidesZ="0.9" colourBottomX="0.9" colourBottomY="0.9" colourBottomZ="0.9" render="true" />
+  </Geometry>
+
+  <CrashShapes>
+    <CrashShape type="box" name="Props" engineName="FL" crashPropSpeed="30"
+      positionX="0.0" positionY="0.0" positionZ="0.06" rotationX="0"
+      extentsX="0.6" extentsY="0.6" extentsZ="0.05" render="false" />
+  </CrashShapes>
+
+</Physics>
+
+<Graphics>
+  <Model name="Standard" model3DS="SystemData/Aeroplanes/Wasp/Wasp.ac" modelScale="1.0" cullBackFace="true"
+    unsetColourR="255" unsetColourG="255" unsetColourB="0" offsetX="0" offsetY="0.0" offsetZ="0.0" />
+  <ControlSurface name="PropellerFL" source="FL"
+    hingePoint1X="-0.155563" hingePoint1Y="1" hingePoint1Z="-0.155564"
+    hingePoint2X="-0.155563" hingePoint2Y="0" hingePoint2Z="-0.155564" />
+  <ControlSurface name="PropellerFR" source="FR"
+    hingePoint1X="0.155563" hingePoint1Y="0" hingePoint1Z="-0.155564"
+    hingePoint2X="0.155563" hingePoint2Y="1" hingePoint2Z="-0.155564" />
+  <ControlSurface name="PropellerBL" source="BL"
+    hingePoint1X="-0.155563" hingePoint1Y="0" hingePoint1Z="0.155564"
+    hingePoint2X="-0.155563" hingePoint2Y="1" hingePoint2Z="0.155564" />
+  <ControlSurface name="PropellerBR" source="BR"
+    hingePoint1X="0.155563" hingePoint1Y="1" hingePoint1Z="0.155564"
+    hingePoint2X="0.155563" hingePoint2Y="0" hingePoint2Z="0.155564" />
+</Graphics>
