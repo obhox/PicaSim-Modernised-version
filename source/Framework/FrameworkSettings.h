@@ -55,6 +55,11 @@ struct FrameworkSettings
     int   mShadowMode;
     float mCsmBias;
 
+    // Anisotropic texture filtering level for 3D content (1 = off/isotropic, up to
+    // the driver max, typ. 16). Driven by the graphics-quality tier. Default 1 so
+    // the look is unchanged until a tier / user opts in.
+    int   mAnisotropy;
+
     // Enhanced water (Phase 5). Opt-in, default OFF so existing lake/plain scenes
     // render bit-for-bit unchanged (they keep using plain.frag). When true the
     // inner water disc is drawn with plain_water.frag: scrolling ripple normal,

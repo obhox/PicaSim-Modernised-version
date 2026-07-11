@@ -236,6 +236,23 @@ struct Options : public Settings
     int mVersion;
 
     FrameworkSettings mFrameworkSettings;
+
+    // Unified graphics-quality tier. This is a convenience "front end" that drives
+    // the individual renderer feature-flags below (mFrameworkSettings.mUsePBR,
+    // mBloomEnabled, mShadowMode, mEnhancedWater, ... and the legacy shadow types)
+    // as one coherent bundle via ApplyGraphicsQuality(). QUALITY_CUSTOM means the
+    // user has hand-tweaked an individual flag, so no tier is imposed. Resolution-
+    // style knobs (texture detail, skybox detail, MSAA) are intentionally NOT
+    // touched here - those stay under the per-screen presets / user control.
+    enum GraphicsQuality { QUALITY_LOW, QUALITY_MEDIUM, QUALITY_HIGH, QUALITY_ULTRA, QUALITY_CUSTOM, QUALITY_MAX };
+    GraphicsQuality mGraphicsQuality;
+
+    // Set every renderer feature-flag to the coherent bundle for 'quality' and
+    // record mGraphicsQuality = quality. Passing QUALITY_CUSTOM only records the
+    // tag and leaves the flags alone. Reconciles the two shadow systems: when the
+    // cascaded shadow map is on (mShadowMode==2) the legacy blob/projected plane
+    // shadows are forced off so shadows are not drawn twice.
+    void ApplyGraphicsQuality(GraphicsQuality quality);
     Language mLanguage;
     FreeFlyMode mFreeFlyMode;
     bool  mFreeFlyOnStartup;

@@ -791,6 +791,19 @@ void SettingsMenu::RenderOptions1Tab()
         SettingsWidgets::SectionHeader(TXT(PS_GRAPHICSSETTINGS));
         SettingsWidgets::BeginSettingsBlock();
         {
+            // Unified quality tier. Picking a tier applies a coherent bundle of the
+            // renderer feature-flags via ApplyGraphicsQuality(); hand-editing any of
+            // the individual flags below flips this back to "Custom".
+            static const char* qualityDescs[] = { "Low", "Medium", "High", "Ultra", "Custom" };
+            int quality = (int)options.mGraphicsQuality;
+            if (SettingsWidgets::Combo("Graphics quality", quality, qualityDescs, 5))
+            {
+                if (quality != Options::QUALITY_CUSTOM)
+                    options.ApplyGraphicsQuality((Options::GraphicsQuality)quality);
+                else
+                    options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+            }
+
             SettingsWidgets::SliderFloat(TXT(PS_GROUNDTERRAINLOD), options.mGroundViewTerrainLOD, 0.0f, 500.0f);
             SettingsWidgets::SliderFloat(TXT(PS_AEROPLANETERRAINLOD), options.mAeroplaneViewTerrainLOD, 0.0f, 500.0f);
             SettingsWidgets::Checkbox(TXT(PS_UPDATETERRAINLOD), options.mGroundViewUpdateTerrainLOD);
@@ -803,18 +816,51 @@ void SettingsMenu::RenderOptions1Tab()
             static const char* shadowDescs[] = { TXT(PS_NONE), TXT(PS_BLOB), TXT(PS_PROJECTED) };
             int controlledShadow = (int)options.mControlledPlaneShadows;
             if (SettingsWidgets::Combo(TXT(PS_CONTROLLEDPLANESHADOWS), controlledShadow, shadowDescs, 3))
+            {
                 options.mControlledPlaneShadows = (Options::ShadowType)controlledShadow;
+                options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+            }
 
             int otherShadow = (int)options.mOtherShadows;
             if (SettingsWidgets::Combo(TXT(PS_OTHERSHADOWS), otherShadow, shadowDescs, 3))
+            {
                 options.mOtherShadows = (Options::ShadowType)otherShadow;
+                options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+            }
 
             SettingsWidgets::SliderInt(TXT(PS_PROJECTEDSHADOWDETAIL), options.mProjectedShadowDetail, 7, 10);
             SettingsWidgets::Checkbox(TXT(PS_USE16BIT), options.m16BitTextures);
             SettingsWidgets::Checkbox(TXT(PS_SEPARATESPECULAR), options.mSeparateSpecular);
-            // Classic rendering: skip the HDR/post-process pipeline and draw the
-            // scene straight to the screen (identical to the pre-HDR output).
-            SettingsWidgets::Checkbox("Classic rendering", options.mFrameworkSettings.mClassicRendering);
+
+            // --- Advanced modern-renderer flags -------------------------------
+            // These are the individual feature-flags that the "Graphics quality"
+            // tier above drives. Touching any of them puts the tier into "Custom".
+            SettingsWidgets::SectionHeader("Advanced rendering");
+            {
+                // Classic rendering: skip the HDR/post-process pipeline and draw the
+                // scene straight to the screen (identical to the pre-HDR output).
+                if (SettingsWidgets::Checkbox("Classic rendering (no HDR/post)", options.mFrameworkSettings.mClassicRendering))
+                    options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+                if (SettingsWidgets::Checkbox("PBR model shading", options.mFrameworkSettings.mUsePBR))
+                    options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+                if (SettingsWidgets::Checkbox("PBR-neutral tonemap", options.mFrameworkSettings.mPBRTonemap))
+                    options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+                if (SettingsWidgets::Checkbox("Bloom", options.mFrameworkSettings.mBloomEnabled))
+                    options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+                if (options.mFrameworkSettings.mBloomEnabled)
+                    SettingsWidgets::SliderFloat("Bloom intensity", options.mFrameworkSettings.mBloomIntensity, 0.0f, 1.0f);
+                if (SettingsWidgets::Checkbox("FXAA (post anti-aliasing)", options.mFrameworkSettings.mFXAAEnabled))
+                    options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+                // Shadow technique for the model/terrain pass: 0=Off, 1=Blob, 2=CSM.
+                // (Distinct from the per-plane blob/projected combos above, which the
+                // tier forces off when cascaded maps are selected.)
+                static const char* shadowModeDescs[] = { "Off", "Blob", "Cascaded maps" };
+                if (SettingsWidgets::Combo("Shadow technique", options.mFrameworkSettings.mShadowMode, shadowModeDescs, 3))
+                    options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+                if (SettingsWidgets::Checkbox("Enhanced water", options.mFrameworkSettings.mEnhancedWater))
+                    options.mGraphicsQuality = Options::QUALITY_CUSTOM;
+                SettingsWidgets::SliderFloat("Exposure", options.mFrameworkSettings.mExposure, 0.25f, 3.0f);
+            }
             SettingsWidgets::SliderFloat(TXT(PS_AMBIENTLIGHTINGSCALE), options.mAmbientLightingScale, 0.0f, 5.0f);
             SettingsWidgets::SliderFloat(TXT(PS_DIFFUSELIGHTINGSCALE), options.mDiffuseLightingScale, 0.0f, 5.0f);
             SettingsWidgets::SliderInt(TXT(PS_TERRAINTEXTUREDETAIL), options.mBasicTextureDetail, 8, 10);

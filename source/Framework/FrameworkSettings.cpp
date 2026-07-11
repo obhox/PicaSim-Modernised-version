@@ -27,6 +27,7 @@ FrameworkSettings::FrameworkSettings()
     mSHAmbientScale(1.0f),
     mShadowMode(1),        // 1 = Blob (legacy default). 2 = CSM (opt-in).
     mCsmBias(0.0015f),
+    mAnisotropy(1),        // 1 = off; raised by the graphics-quality tier.
     mEnhancedWater(false)  // opt-in; default OFF keeps existing water unchanged.
 {
     // Get platform type
