@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+<Materials>
+  <!-- Test normal map on the textured body material (ac3dmat1). Normal.png is a
+       bold procedural panel-line/rivet pattern used to verify the normal-mapping
+       pipeline; replace with an art-authored map for production. -->
+  <Material name="ac3dmat1" normalMap="Normal.png"/>
+</Materials>

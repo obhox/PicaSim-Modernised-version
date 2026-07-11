@@ -237,6 +237,9 @@ bool LoadGltfModel(
                         // (unflipped stb) Texture loader.
                         tv.mTexCoord[0] = uvw[0];
                         tv.mTexCoord[1] = 1.0f - uvw[1];
+                        // glTF normal-map parsing is not wired up yet; a zero tangent
+                        // is inert (the shader ignores it without u_useNormalMap).
+                        tv.mTangent = Vector3(0.0f, 0.0f, 0.0f);
                         component.mTexturedVertices.push_back(tv);
                     }
                 }

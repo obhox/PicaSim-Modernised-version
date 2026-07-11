@@ -16,6 +16,20 @@
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include <stb_image_resize2.h>
 
+// EXT_texture_filter_anisotropic tokens. Core in GL 4.6; on GL 3.3/4.1 (incl.
+// Apple's gl3.h) they come from the widely-supported EXT extension. Define the
+// numeric values ourselves so this compiles regardless of which headers expose
+// them; runtime support is checked by querying GL_MAX_TEXTURE_MAX_ANISOTROPY.
+#ifndef GL_TEXTURE_MAX_ANISOTROPY
+#define GL_TEXTURE_MAX_ANISOTROPY 0x84FE
+#endif
+#ifndef GL_MAX_TEXTURE_MAX_ANISOTROPY
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY 0x84FF
+#endif
+
+float Texture::sGlobalAnisotropy = 1.0f;
+float Texture::sMaxAnisotropy = -1.0f;
+
 //==============================================================================
 // Image implementation
 //==============================================================================
@@ -275,9 +289,27 @@ void Texture::Upload()
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_GREEN);
     }
 
-    // Set default filtering
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // If mip-mapping was requested (SetMipMapping(true) called before Upload, as
+    // the 3D model/terrain/runway paths do) generate the mip chain now and enable
+    // trilinear + anisotropic filtering. Previously SetMipMapping ran before the
+    // upload, so its mUploaded guard skipped generation and no mip levels ever
+    // existed - 3D textures aliased at distance. UI/overlay textures never set the
+    // flag, so they keep plain GL_LINEAR and are unaffected.
+    if (mFlags & MIPMAPPED_F)
+    {
+        glGenerateMipmap(GL_TEXTURE_2D);
+        mHasMipmaps = true;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        float aniso = ResolveAnisotropy(sGlobalAnisotropy);
+        if (aniso > 1.0f)
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, aniso);
+    }
+    else
+    {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    }
 
     // Set default wrapping
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -351,6 +383,46 @@ void Texture::GenerateMipmaps()
     glBindTexture(GL_TEXTURE_2D, 0);
 
     mHasMipmaps = true;
+}
+
+//==============================================================================
+// Anisotropic filtering
+//==============================================================================
+void Texture::SetGlobalAnisotropy(float level)
+{
+    sGlobalAnisotropy = level < 1.0f ? 1.0f : level;
+}
+
+float Texture::GetGlobalAnisotropy()
+{
+    return sGlobalAnisotropy;
+}
+
+float Texture::ResolveAnisotropy(float want)
+{
+    if (sMaxAnisotropy < 0.0f)
+    {
+        // Query the driver cap once. If the enum is unsupported the value is left
+        // untouched (the GL error is benign), so we fall back to 1.0 = disabled.
+        GLfloat maxA = 1.0f;
+        glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &maxA);
+        sMaxAnisotropy = maxA >= 1.0f ? maxA : 1.0f;
+    }
+    if (want < 1.0f) want = 1.0f;
+    if (want > sMaxAnisotropy) want = sMaxAnisotropy;
+    return want;
+}
+
+void Texture::SetAnisotropy(float level)
+{
+    if (mTextureID == 0)
+        return;
+    float aniso = ResolveAnisotropy(level < 0.0f ? sGlobalAnisotropy : level);
+    if (aniso <= 1.0f)
+        return;  // hardware has no anisotropic filtering, or level 1 (off)
+    glBindTexture(GL_TEXTURE_2D, mTextureID);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, aniso);
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void Texture::Release()

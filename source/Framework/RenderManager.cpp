@@ -124,6 +124,10 @@ void RenderManager::Init(FrameworkSettings& frameworkSettings, LoadingScreenHelp
     IwAssert(ROWLHOUSE, !mInstance);
     mInstance = new RenderManager(frameworkSettings);
 
+    // Publish the quality tier's anisotropic-filtering level so textures loaded for
+    // this scene pick it up when they generate mipmaps (see Texture::Upload).
+    Texture::SetGlobalAnisotropy((float)frameworkSettings.mAnisotropy);
+
     // Get dimensions from IwGL
     int width =  Platform::GetDisplayWidth();
     int height = Platform::GetDisplayHeight();

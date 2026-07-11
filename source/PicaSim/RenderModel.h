@@ -102,6 +102,12 @@ public:
         Vector3 mPoint;
         Vector3 mNormal;
         GLfloat mTexCoord[2];
+        // Tangent (model space) for normal mapping. Appended after the existing
+        // fields on purpose: the interleaved attribute offsets for position/normal/
+        // texcoord in the draw path are hard-coded from the leading field sizes, so
+        // keeping this last leaves them - and un-mapped rendering - unchanged. Zero
+        // when no normal map is used (the shader ignores it unless u_useNormalMap).
+        Vector3 mTangent;
     };
     typedef std::vector<TexturedVertex> TexturedVertices;
 
@@ -128,7 +134,7 @@ public:
 
     struct Component
     {
-        Component(const std::string& name) : mVertexBuffer(0), mName(name), mTM(Transform::g_Identity), mTexture(0), mAlphaScale(1.0f), mRoughness(0.6f), mMetallic(0.0f) {}
+        Component(const std::string& name) : mVertexBuffer(0), mName(name), mTM(Transform::g_Identity), mTexture(0), mNormalTexture(0), mAlphaScale(1.0f), mRoughness(0.6f), mMetallic(0.0f) {}
         std::string        mName;
         std::string        mTextureName;
         UntexturedVertices mUntexturedVertices;
@@ -136,6 +142,7 @@ public:
         Transform          mTM;
         GLuint             mVertexBuffer;
         Texture*           mTexture;
+        Texture*           mNormalTexture;  // optional normal map (Materials.xml normalMap="")
         float              mAlphaScale;
         // PBR-lite per-component material (derived from AC3D shininess, optionally
         // overridden by <model dir>/Materials.xml). metallic defaults to 0.

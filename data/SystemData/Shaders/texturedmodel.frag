@@ -18,14 +18,34 @@ uniform float u_metallic;
 uniform vec3  u_shCoeffs[9];
 uniform float u_shAmbientScale;
 
+// Normal mapping (optional). u_useNormalMap gates it so meshes without a normal
+// map are byte-identical to before (they use the interpolated vertex normal).
+uniform sampler2D u_normalTex;
+uniform float     u_useNormalMap;
+
 VARYING vec4      v_colour;
 VARYING LOWP vec3 v_normal;
 VARYING vec2      v_texCoord;
 VARYING vec3      v_worldPos;
+VARYING vec3      v_tangent;
 
 void main()
 {
     vec3 normal    = normalize(v_normal);
+    // Perturb the normal by the tangent-space normal map when one is bound. The
+    // tangent is re-orthogonalised against the interpolated normal (Gram-Schmidt),
+    // so a flat per-triangle tangent from the mesh builder is sufficient.
+    if (u_useNormalMap > 0.5)
+    {
+        vec3 T = v_tangent - normal * dot(normal, v_tangent);
+        if (dot(T, T) > 1e-8)
+        {
+            T = normalize(T);
+            vec3 B = cross(normal, T);
+            vec3 nTS = TEXTURE2D(u_normalTex, v_texCoord).xyz * 2.0 - 1.0;
+            normal = normalize(T * nTS.x + B * nTS.y + normal * nTS.z);
+        }
+    }
     vec4 texColour = TEXTURE2D_BIAS(u_texture, v_texCoord, u_texBias);
 
     // Sun visibility from the cascaded shadow map (1.0 when CSM disabled).

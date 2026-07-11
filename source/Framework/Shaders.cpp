@@ -242,6 +242,15 @@ void TexturedModelShader::Init()
     a_texCoord            = getAttribLocation(mShaderProgram, "a_texCoord");
     u_texture             = getUniformLocation(mShaderProgram, "u_texture");
     u_texBias             = getUniformLocation(mShaderProgram, "u_texBias");
+    a_tangent             = getAttribLocation(mShaderProgram, "a_tangent");
+    u_normalTex           = getUniformLocationOpt(mShaderProgram, "u_normalTex");
+    u_useNormalMap        = getUniformLocationOpt(mShaderProgram, "u_useNormalMap");
+    if (u_normalTex >= 0)
+    {
+        glUseProgram(mShaderProgram);
+        glUniform1i(u_normalTex, 1);   // dedicated unit 1 (albedo=0, shadow=4)
+        glUseProgram(0);
+    }
 }
 
 //======================================================================================================================
@@ -252,6 +261,11 @@ void TexturedModelSeparateSpecularShader::Init()
     a_texCoord            = getAttribLocation(mShaderProgram, "a_texCoord");
     u_texture             = getUniformLocation(mShaderProgram, "u_texture");
     u_texBias             = getUniformLocation(mShaderProgram, "u_texBias");
+    // Shares texturedmodel.vert, which declares a_tangent - query it so the draw
+    // path can enable the array. This frag doesn't sample the normal map.
+    a_tangent             = getAttribLocation(mShaderProgram, "a_tangent");
+    u_normalTex           = getUniformLocationOpt(mShaderProgram, "u_normalTex");
+    u_useNormalMap        = getUniformLocationOpt(mShaderProgram, "u_useNormalMap");
 }
 
 //======================================================================================================================

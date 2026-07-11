@@ -122,6 +122,10 @@ class TexturedModelShader : public ModelShader
 public:
     void Init() OVERRIDE;
     int a_texCoord, u_texture, u_texBias;
+    // Normal mapping (optional). a_tangent feeds the TBN; u_normalTex samples the
+    // tangent-space normal map (bound to texture unit 1); u_useNormalMap gates it
+    // (0 => the interpolated vertex normal is used, byte-identical to before).
+    int a_tangent, u_normalTex, u_useNormalMap;
 };
 
 //======================================================================================================================
