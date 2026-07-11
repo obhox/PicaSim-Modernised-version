@@ -10,14 +10,18 @@ namespace UIHelpers
 {
 
 // Static state
-static ImFont* sFont = nullptr;
-static float sBaseFontSize = 18.0f;  // Base font size at 720p
+static ImFont* sFont = nullptr;      // regular UI font (monospace)
+static ImFont* sFontBold = nullptr;  // bold face for headings / wordmark
+static float sBaseFontSize = 17.0f;  // Base font size at 720p
 
 //======================================================================================================================
 void Init()
 {
-    // Font path relative to data directory (app runs from data folder)
-    const char* fontPath = "Fonts/FontRegular.ttf";
+    // The UI uses JetBrains Mono (SIL OFL, bundled in Fonts/). The whole "field
+    // index" look is built on a single monospace family - a bold face is loaded
+    // alongside so headings/wordmarks read heavier without a second typeface.
+    const char* fontPath     = "Fonts/JetBrainsMono-Regular.ttf";
+    const char* fontBoldPath = "Fonts/JetBrainsMono-Bold.ttf";
 
     // Calculate initial font size based on current screen
     int height = Platform::GetDisplayHeight();
@@ -25,33 +29,41 @@ void Init()
     if (scale < 1.0f) scale = 1.0f;
     float fontSize = sBaseFontSize * scale;
 
-    // Load the font
     ImGuiIO& io = ImGui::GetIO();
 
-    // Custom glyph ranges: basic Latin + Latin Extended + General Punctuation (includes bullet •)
+    // Custom glyph ranges: basic Latin + Latin Extended + General Punctuation (arrows, bullet •)
     static const ImWchar glyphRanges[] =
     {
         0x0020, 0x00FF,  // Basic Latin + Latin Supplement
         0x0100, 0x017F,  // Latin Extended-A
-        0x2000, 0x206F,  // General Punctuation (includes bullet •, dashes, etc.)
+        0x2000, 0x206F,  // General Punctuation (bullet •, dashes, ↵)
         0x2100, 0x214F,  // Letterlike Symbols
-        0,               // Null terminator
+        0x2190, 0x21FF,  // Arrows (→ ↑ ↓)
+        0,
     };
 
-    // Try to load the custom font with extended glyph ranges
     ImFontConfig fontConfig;
     fontConfig.OversampleH = 2;
     fontConfig.OversampleV = 2;
     sFont = io.Fonts->AddFontFromFileTTF(fontPath, fontSize, &fontConfig, glyphRanges);
     if (sFont)
-    {
-        printf("UIHelpers: Loaded font from %s at size %.1f with extended glyphs\n", fontPath, fontSize);
-    }
+        printf("UIHelpers: Loaded font from %s at size %.1f\n", fontPath, fontSize);
     else
     {
-        printf("UIHelpers: Failed to load font from %s, using default\n", fontPath);
-        sFont = io.Fonts->AddFontDefault();
+        // Fall back to the previous bundled sans if the mono font is missing.
+        printf("UIHelpers: Failed to load %s, trying FontRegular.ttf\n", fontPath);
+        sFont = io.Fonts->AddFontFromFileTTF("Fonts/FontRegular.ttf", fontSize, &fontConfig, glyphRanges);
+        if (!sFont)
+            sFont = io.Fonts->AddFontDefault();
     }
+
+    // Bold face (slightly larger base so headings have presence). Optional.
+    ImFontConfig boldConfig;
+    boldConfig.OversampleH = 2;
+    boldConfig.OversampleV = 2;
+    sFontBold = io.Fonts->AddFontFromFileTTF(fontBoldPath, fontSize, &boldConfig, glyphRanges);
+    if (!sFontBold)
+        sFontBold = sFont;   // fall back to regular if bold is unavailable
 
     // Build the font atlas
     io.Fonts->Build();
@@ -83,6 +95,12 @@ void ApplyFontScale()
 ImFont* GetFont()
 {
     return sFont;
+}
+
+//======================================================================================================================
+ImFont* GetBoldFont()
+{
+    return sFontBold ? sFontBold : sFont;
 }
 
 //======================================================================================================================
