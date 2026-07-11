@@ -262,6 +262,11 @@ int main(int argc, char* argv[])
             {
                 gCaptureMenu = argv[++i];
             }
+            // --paused: force the paused state (shows the full HUD button bar).
+            else if (strcmp(argv[i], "--paused") == 0)
+            {
+                PicaSim::SetBootPaused(true);
+            }
         }
         if (screenshotFrame > 0)
             Window::SetAutoScreenshot(screenshotFrame, screenshotFile);

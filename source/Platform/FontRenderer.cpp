@@ -79,8 +79,10 @@ bool FontRenderer::Init()
         return true;
     }
 
-    // Try to generate from TTF
-    if (GenerateFontTexture("fonts/FontRegular.ttf", 20))
+    // Generate the HUD bitmap-font atlas from JetBrains Mono so the in-flight
+    // text matches the menus (falls back to the old sans if it's missing).
+    if (GenerateFontTexture("Fonts/JetBrainsMono-Regular.ttf", 22) ||
+        GenerateFontTexture("fonts/FontRegular.ttf", 20))
     {
         TRACE_FILE_IF(1) TRACE("Generated font texture from TTF");
         mInitialized = true;

@@ -42,6 +42,7 @@ float numButtonSlots = 8.0f;
 PicaSim* PicaSim::mInstance = 0;
 std::string PicaSim::mBootGhostFile;
 bool PicaSim::mForceTelemetry = false;
+bool PicaSim::mBootPaused = false;
 
 //======================================================================================================================
 PicaSim::PicaSim(GameSettings& gameSettings)
@@ -788,6 +789,11 @@ PicaSim::UpdateResult PicaSim::Update(int64 deltaTimeMs)
 
     if (deltaTime > 0.1f)
         deltaTime = 0.1f;
+
+    // Dev capture hook: --paused forces the paused state so the full HUD button
+    // bar can be golden-screenshotted.
+    if (mBootPaused)
+        mStatus = STATUS_PAUSED;
 
     float gameDeltaTime = mStatus == STATUS_PAUSED ? 0.0f : deltaTime;
 
