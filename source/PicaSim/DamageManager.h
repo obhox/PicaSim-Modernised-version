@@ -49,10 +49,14 @@ public:
     /// True only when crash damage is enabled in the framework settings.
     bool IsEnabled() const;
 
-    /// Post-physics: scan the aeroplane body's contact manifolds for a hard
-    /// impact (applied impulse over the per-aircraft threshold) and, if found,
-    /// break the nearest intact wing panel nearest that contact.
-    void ProcessImpacts(float deltaTime, const Transform& objectTM, const Vector3& comWorldPos, const Vector3& vel, const Vector3& angVel);
+    /// Post-physics: decide whether this substep's impact is hard enough to shed a
+    /// panel, and if so break the intact wing nearest the actual contact point.
+    /// Severity is the whole-body momentum change this substep,
+    /// impactImpulse = mass * |delta-v| (substep-independent, unlike a single
+    /// contact's applied impulse); it is compared against the per-aircraft
+    /// threshold. The contact manifolds are only used to locate where the hit
+    /// landed, so a nose/belly strike no longer sheds a wingtip.
+    void ProcessImpacts(float deltaTime, float impactImpulse, const Transform& objectTM, const Vector3& comWorldPos, const Vector3& vel, const Vector3& angVel);
 
     /// Post-physics: refresh debris transforms from their rigid bodies.
     void UpdateDebris(float deltaTime);

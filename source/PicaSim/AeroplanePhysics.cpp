@@ -762,7 +762,7 @@ void AeroplanePhysics::EntityUpdate(float deltaTime, int entityLevel)
                 }
                 if (deltaVelZ > as.mCrashDeltaVel.z * velScale)
                 {
-                    TRACE("Crash from velocity change in y %5.2f > %5.2f", deltaVelZ, as.mCrashDeltaVel.z * velScale);
+                    TRACE("Crash from velocity change in z %5.2f > %5.2f", deltaVelZ, as.mCrashDeltaVel.z * velScale);
                     mAeroplane->SetCrashFlag(Aeroplane::CRASHFLAG_AIRFRAME);
                 }
                 if (deltaAngVelX > as.mCrashDeltaAngVel.x * angVelScale)
@@ -790,7 +790,7 @@ void AeroplanePhysics::EntityUpdate(float deltaTime, int entityLevel)
                     if (wheel.GetCollapsed(as.mCrashSuspensionForceScale))
                     {
                         float force = wheel.GetSuspensionForce();
-                        TRACE("Crash from wheel suspension force", force);
+                        TRACE("Crash from wheel suspension force %5.2f", force);
                         mAeroplane->SetCrashFlag(Aeroplane::CRASHFLAG_UNDERCARRIAGE);
                     }
                 }
@@ -802,8 +802,11 @@ void AeroplanePhysics::EntityUpdate(float deltaTime, int entityLevel)
 
         // Crash damage: look for a hard impact this step and break off the nearest
         // panel if found, then keep any debris transforms in sync. Both are no-ops
-        // when crash damage is disabled.
-        mDamageManager.ProcessImpacts(deltaTime, mTM, mCoMTM.GetTrans(), mCoMVel, mCoMAngVel);
+        // when crash damage is disabled. Impact severity is the whole-body momentum
+        // change this substep (mass * |delta-v|) - the same quantity the airframe
+        // crash test uses - so it is substep-independent.
+        const float impactImpulse = mMass * deltaVel.GetLength();
+        mDamageManager.ProcessImpacts(deltaTime, impactImpulse, mTM, mCoMTM.GetTrans(), mCoMVel, mCoMAngVel);
         mDamageManager.UpdateDebris(deltaTime);
     }
     else if (entityLevel == ENTITY_LEVEL_POST_PHYSICS)

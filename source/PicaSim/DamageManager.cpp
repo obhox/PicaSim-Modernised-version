@@ -115,6 +115,7 @@ Wing* DamageManager::FindNearestBreakableWing(const Vector3& contactWorld, const
 
     Wing* best = 0;
     float bestDistSq = FLT_MAX;
+    Vector3 bestExtents(0.0f, 0.0f, 0.0f);
     for (size_t i = 0 ; i != mWings->size() ; ++i)
     {
         Wing* wing = (*mWings)[i];
@@ -128,7 +129,20 @@ Wing* DamageManager::FindNearestBreakableWing(const Vector3& contactWorld, const
         {
             bestDistSq = distSq;
             best = wing;
+            bestExtents = wing->GetExtents();
         }
+    }
+
+    // Distance gate: only shed this panel when the impact is actually on or close
+    // to it. Without this a nose-first or belly/fuselage strike (whose contact is
+    // nowhere near a wing) would still break the nearest wingtip. Reach = half the
+    // panel's diagonal, with a small margin so a graze at the edge still counts.
+    if (best)
+    {
+        Vector3 e(fabsf(bestExtents.x), fabsf(bestExtents.y), fabsf(bestExtents.z));
+        float reach = 0.5f * e.GetLength() * 1.25f + 0.1f;
+        if (bestDistSq > reach * reach)
+            return 0;
     }
     return best;
 }
@@ -182,13 +196,22 @@ void DamageManager::BreakWing(Wing* wing, const Transform& objectTM, const Vecto
 }
 
 //======================================================================================================================
-void DamageManager::ProcessImpacts(float deltaTime, const Transform& objectTM, const Vector3& comWorldPos, const Vector3& vel, const Vector3& angVel)
+void DamageManager::ProcessImpacts(float deltaTime, float impactImpulse, const Transform& objectTM, const Vector3& comWorldPos, const Vector3& vel, const Vector3& angVel)
 {
     if (deltaTime <= 0.0f)
         return;
     if (!IsEnabled() || !mAeroplaneBody)
         return;
     if ((int) mBrokenComponents.size() >= mMaxBreaks)
+        return;
+
+    // Severity gate: use the whole-body momentum change this substep
+    // (impactImpulse = mass * |delta-v|). This is independent of the substep count
+    // and the number of contact points, unlike a single contact's applied impulse,
+    // and it shares the units of mImpactThreshold (default mass * 4 m/s). A gentle
+    // rolling or sliding contact barely changes the body velocity and never trips
+    // this, so only a genuine hard hit gets past here.
+    if (impactImpulse <= mImpactThreshold)
         return;
 
     btDynamicsWorld& world = EntityManager::GetInstance().GetDynamicsWorld();
@@ -210,20 +233,22 @@ void DamageManager::ProcessImpacts(float deltaTime, const Transform& objectTM, c
         for (int j = 0 ; j < numContacts ; ++j)
         {
             btManifoldPoint& cp = manifold->getContactPoint(j);
-            // getAppliedImpulse() reflects the normal impulse the solver applied at
-            // this contact in the last substep - a robust proxy for impact severity.
-            if (cp.getAppliedImpulse() > mImpactThreshold)
+            // Only a touching/penetrating point marks where the impact actually
+            // landed; severity was already decided from the body delta-v above.
+            if (cp.getDistance() > 0.0f)
+                continue;
+
+            Vector3 contactWorld = BulletVector3ToVector3(cp.getPositionWorldOnB());
+            // FindNearestBreakableWing returns null when the contact is not near
+            // any wing (e.g. a nose or fuselage strike), so nothing breaks then.
+            Wing* wing = FindNearestBreakableWing(contactWorld, objectTM);
+            if (wing)
             {
-                Vector3 contactWorld = BulletVector3ToVector3(cp.getPositionWorldOnB());
-                Wing* wing = FindNearestBreakableWing(contactWorld, objectTM);
-                if (wing)
-                {
-                    BreakWing(wing, objectTM, comWorldPos, vel, angVel);
-                    if ((int) mBrokenComponents.size() >= mMaxBreaks)
-                        return;
-                }
-                break; // at most one break per manifold per frame
+                BreakWing(wing, objectTM, comWorldPos, vel, angVel);
+                if ((int) mBrokenComponents.size() >= mMaxBreaks)
+                    return;
             }
+            break; // at most one break per manifold per frame
         }
     }
 }
