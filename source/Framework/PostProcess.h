@@ -13,6 +13,9 @@ struct PostSettings
     float exposure       = 1.0f;
     bool  fxaaEnabled    = false;
     bool  pbrTonemap     = false;  // false => identity clamp (preserve LDR look); true => PBR Neutral
+    bool  ssaoEnabled    = false;
+    float ssaoIntensity  = 0.7f;   // darkening strength
+    float ssaoRadius     = 0.9f;   // occlusion radius, view-space metres
 };
 
 // PostProcess resolves the floating-point HDR scene texture to the LDR default
@@ -34,8 +37,10 @@ public:
     // currently bound draw framebuffer (expected to be the default framebuffer).
     // For a full-screen (mono) resolve the rect is the whole texture; for stereo
     // it is one eye's half.
-    void Resolve(GLuint hdrColorTex, int hdrW, int hdrH,
+    // depthTex (or 0) + camera scalars are used only when settings.ssaoEnabled.
+    void Resolve(GLuint hdrColorTex, GLuint depthTex, int hdrW, int hdrH,
                  int rectX, int rectY, int rectW, int rectH,
+                 float camNear, float camFar, float camTanHalfFovY, float camAspect,
                  const PostSettings& settings);
 
 private:
@@ -44,10 +49,16 @@ private:
 
     void EnsureBloomResources(int w, int h);
     void EnsureLdrResources(int w, int h);
+    void EnsureAoResources(int w, int h);
     void DestroyBloomResources();
     void DestroyLdrResources();
+    void DestroyAoResources();
     // Runs the down/up bloom chain over hdrTex; returns the bloom result texture.
     GLuint RunBloom(GLuint hdrTex, int hdrW, int hdrH, const PostSettings& settings);
+    // Computes + blurs SSAO from depthTex; returns the blurred AO texture (or 0).
+    GLuint RunSSAO(GLuint depthTex, int w, int h,
+                   float camNear, float camFar, float camTanHalfFovY, float camAspect,
+                   const PostSettings& settings);
 
     bool mInitialised = false;
 
@@ -55,11 +66,23 @@ private:
     GLuint mDownProgram    = 0;
     GLuint mUpProgram      = 0;
     GLuint mFxaaProgram    = 0;
+    GLuint mSsaoProgram    = 0;
+    GLuint mAoBlurProgram  = 0;
 
     // tonemap uniform locations
     GLint u_hdrTexture = -1, u_bloomTexture = -1;
     GLint u_uvOffset = -1, u_uvScale = -1;
     GLint u_exposure = -1, u_bloomIntensity = -1, u_tonemap = -1;
+    GLint u_aoTexture = -1, u_useAO = -1;
+
+    // ssao / ao-blur uniform locations
+    GLint s_depthTex = -1, s_texelSize = -1, s_near = -1, s_far = -1;
+    GLint s_tanHalfFovY = -1, s_aspect = -1, s_radius = -1, s_intensity = -1;
+    GLint b_aoTex = -1, b_texelSize = -1;
+
+    // AO scratch targets (RGBA8, full res): raw then blurred.
+    GLuint mAoTex = 0, mAoFBO = 0, mAoBlurTex = 0, mAoBlurFBO = 0;
+    int mAoW = 0, mAoH = 0;
 
     // downsample / upsample / fxaa uniform locations
     GLint d_texture = -1, d_texelSize = -1, d_firstMip = -1;

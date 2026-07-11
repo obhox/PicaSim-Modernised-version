@@ -373,6 +373,7 @@ void Options::ApplyGraphicsQuality(GraphicsQuality quality)
         fs.mShadowMode       = 0;
         fs.mEnhancedWater    = false;
         fs.mAnisotropy       = 1;
+        fs.mSSAO             = false;
         mControlledPlaneShadows = BLOB;
         mOtherShadows           = NONE;
         break;
@@ -387,6 +388,7 @@ void Options::ApplyGraphicsQuality(GraphicsQuality quality)
         fs.mShadowMode       = 1;   // blob
         fs.mEnhancedWater    = false;
         fs.mAnisotropy       = 4;
+        fs.mSSAO             = false;
         mControlledPlaneShadows = BLOB;
         mOtherShadows           = BLOB;
         break;
@@ -403,6 +405,7 @@ void Options::ApplyGraphicsQuality(GraphicsQuality quality)
         fs.mShadowMode       = 2;   // CSM
         fs.mEnhancedWater    = true;
         fs.mAnisotropy       = 8;
+        fs.mSSAO             = true;
         mControlledPlaneShadows = NONE;
         mOtherShadows           = NONE;
         break;
@@ -418,6 +421,7 @@ void Options::ApplyGraphicsQuality(GraphicsQuality quality)
         fs.mShadowMode       = 2;   // CSM
         fs.mEnhancedWater    = true;
         fs.mAnisotropy       = 16;
+        fs.mSSAO             = true;
         mControlledPlaneShadows = NONE;
         mOtherShadows           = NONE;
         break;
@@ -443,6 +447,7 @@ bool Options::WriteToDoc(TiXmlDocument& doc) const
     WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mExposure);
     WRITE_ATTRIBUTE(mFrameworkSettings.mFXAAEnabled);
     WRITE_ATTRIBUTE(mFrameworkSettings.mPBRTonemap);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mSSAO);
     WRITE_ATTRIBUTE(mFrameworkSettings.mUsePBR);
     WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mSHAmbientScale);
     WRITE_ATTRIBUTE(mFrameworkSettings.mEnhancedWater);
@@ -620,6 +625,7 @@ bool Options::ReadFromDoc(TiXmlDocument& doc, bool readAll)
     READ_ATTRIBUTE(mFrameworkSettings.mExposure);
     READ_ATTRIBUTE(mFrameworkSettings.mFXAAEnabled);
     READ_ATTRIBUTE(mFrameworkSettings.mPBRTonemap);
+    READ_ATTRIBUTE(mFrameworkSettings.mSSAO);
     // Additive PBR / water flags - absent in older settings.xml, in which case the
     // constructor defaults (PBR on, ambient scale 1, water off) are kept.
     READ_ATTRIBUTE(mFrameworkSettings.mUsePBR);

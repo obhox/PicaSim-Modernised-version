@@ -457,11 +457,28 @@ void RenderManager::RenderUpdate()
             postSettings.exposure       = mFrameworkSettings.mExposure;
             postSettings.fxaaEnabled    = mFrameworkSettings.mFXAAEnabled;
             postSettings.pbrTonemap     = mFrameworkSettings.mPBRTonemap;
+            postSettings.ssaoEnabled    = mFrameworkSettings.mSSAO;
+
+            // Primary camera scalars for SSAO depth reconstruction.
+            float ssaoNear = mFrameworkSettings.mNearClipPlaneDistance;
+            float ssaoFar  = mFrameworkSettings.mFarClipPlaneDistance;
+            float ssaoTan  = 1.0f, ssaoAspect = (float)w / (float)h;
+            for (Viewports::iterator pv = mViewports.begin(); pv != mViewports.end(); ++pv)
+                if ((*pv)->GetEnabled())
+                {
+                    Camera* cam = (*pv)->GetCamera();
+                    ssaoNear = cam->GetNearClipPlaneDistance();
+                    ssaoFar  = cam->GetFarClipPlaneDistance();
+                    ssaoTan  = tanf(cam->GetVerticalFOV() * 0.5f);
+                    ssaoAspect = (*pv)->GetAspectRatio();
+                    break;
+                }
 
             mPostProcess->Resolve(
-                mHdrTarget->GetColorTexture(), mHdrWidth, mHdrHeight,
+                mHdrTarget->GetColorTexture(), mHdrTarget->GetDepthTexture(), mHdrWidth, mHdrHeight,
                 displayConfig.mLeft, displayConfig.mBottom,
                 displayConfig.mWidth, displayConfig.mHeight,
+                ssaoNear, ssaoFar, ssaoTan, ssaoAspect,
                 postSettings);
 
             // Restore the render state the 3D pass leaves behind (PostProcess
@@ -641,11 +658,14 @@ void RenderManager::RenderWithoutSwap()
             postSettings.exposure       = mFrameworkSettings.mExposure;
             postSettings.fxaaEnabled    = mFrameworkSettings.mFXAAEnabled;
             postSettings.pbrTonemap     = mFrameworkSettings.mPBRTonemap;
+            postSettings.ssaoEnabled    = false;  // SSAO not applied in the VR path
 
             mPostProcess->Resolve(
-                mHdrTarget->GetColorTexture(), mHdrWidth, mHdrHeight,
+                mHdrTarget->GetColorTexture(), 0, mHdrWidth, mHdrHeight,
                 displayConfig.mLeft, displayConfig.mBottom,
                 displayConfig.mWidth, displayConfig.mHeight,
+                mFrameworkSettings.mNearClipPlaneDistance, mFrameworkSettings.mFarClipPlaneDistance,
+                1.0f, (float)w / (float)h,
                 postSettings);
 
             glEnable(GL_DEPTH_TEST);

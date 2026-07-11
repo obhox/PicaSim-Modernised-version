@@ -13,12 +13,18 @@ uniform vec2  u_uvScale;
 uniform float u_exposure;
 uniform float u_bloomIntensity;   // 0.0 => bloom disabled
 uniform float u_tonemap;          // 0.0 => identity (preserve LDR look), 1.0 => PBR Neutral
+uniform sampler2D u_aoTexture;    // screen-space ambient occlusion (1 = unoccluded)
+uniform float u_useAO;            // 0.0 => AO disabled
 
 void main()
 {
     vec2 uv = u_uvOffset + v_texCoord * u_uvScale;
 
     vec3 hdr = TEXTURE2D(u_hdrTexture, uv).rgb;
+    // Darken crevices/contact areas with the blurred AO factor. Applied before
+    // bloom/exposure so occluded areas also bloom less.
+    if (u_useAO > 0.5)
+        hdr *= TEXTURE2D(u_aoTexture, uv).r;
     hdr *= u_exposure;
 
     if (u_bloomIntensity > 0.0)

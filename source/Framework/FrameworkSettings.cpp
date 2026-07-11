@@ -23,6 +23,7 @@ FrameworkSettings::FrameworkSettings()
     mExposure(1.0f),
     mFXAAEnabled(false),
     mPBRTonemap(false),
+    mSSAO(false),
     mUsePBR(true),
     mSHAmbientScale(1.0f),
     mShadowMode(1),        // 1 = Blob (legacy default). 2 = CSM (opt-in).
