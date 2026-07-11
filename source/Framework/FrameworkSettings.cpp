@@ -13,7 +13,7 @@ extern Window* gWindow;
 FrameworkSettings::FrameworkSettings()
     :
     mPhysicsSubsteps(8),
-    mCrashDamage(false),
+    mCrashDamage(true),
     mNearClipPlaneDistance(0.5f),
     mFarClipPlaneDistance(50000.0f),
     mUseMultiLights(true),

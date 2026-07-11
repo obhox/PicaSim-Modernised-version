@@ -637,9 +637,10 @@ void SettingsMenu::RenderOptions1Tab()
             if (mGameSettings.mChallengeSettings.mChallengeMode == ChallengeSettings::CHALLENGE_FREEFLY)
                 SettingsWidgets::SliderFloat(TXT(PS_TIMESCALE), options.mTimeScale, 0.1f, 1.0f);
             SettingsWidgets::SliderInt(TXT(PS_PHYSICSACCURACY), options.mFrameworkSettings.mPhysicsSubsteps, 4, 12);
-            // Opt-in crash damage: hard impacts break off wing panels (which fall
-            // away as debris and stop producing lift). Off by default so flight
-            // physics are unchanged.
+            // Crash damage: hard impacts break off wing panels (which fall away as
+            // debris and stop producing lift). On by default; uncheck to fly with
+            // an indestructible airframe. When off the aero code takes its guarded
+            // no-op path, so flight physics are unchanged from a damage-free build.
             SettingsWidgets::Checkbox("Crash damage (break-off parts)", options.mFrameworkSettings.mCrashDamage);
         }
         SettingsWidgets::EndSettingsBlock();
