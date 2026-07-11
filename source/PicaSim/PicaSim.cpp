@@ -43,6 +43,7 @@ PicaSim* PicaSim::mInstance = 0;
 std::string PicaSim::mBootGhostFile;
 bool PicaSim::mForceTelemetry = false;
 bool PicaSim::mBootPaused = false;
+bool PicaSim::mBootFpv = false;
 
 //======================================================================================================================
 PicaSim::PicaSim(GameSettings& gameSettings)
@@ -421,6 +422,8 @@ void PicaSim::Terminate()
 void PicaSim::HandleMode()
 {
     Mode origMode = mMode;
+
+    if (mBootFpv) mMode = MODE_AEROPLANE;  // dev capture hook (--fpv)
 
     if (mGameSettings.mEnvironmentSettings.mTerrainSettings.mType == TerrainSettings::TYPE_PANORAMA)
         mMode = MODE_GROUND;

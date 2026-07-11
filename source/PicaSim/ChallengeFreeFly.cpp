@@ -12,6 +12,8 @@
 #include "Shaders.h"
 #include "Graphics.h"
 
+#include <vector>
+
 //======================================================================================================================
 void ChallengeFreeFly::Relaunched()
 {
@@ -237,11 +239,131 @@ const float GetDistance(const Options& options, float distance)
 }
 
 //======================================================================================================================
+//======================================================================================================================
+// FPV "OSD": drawn when the onboard (aeroplane) camera is active, so drone /
+// FPV flying gets a Betaflight-style overlay - a centre reticle, an artificial
+// horizon that banks + pitches with the aircraft, and corner readouts. Uses the
+// same FontRenderer + ControllerShader 2D-line path as the rest of the HUD.
+static void DrawFpvOsd(DisplayConfig& dc, const Aeroplane* a, const Camera* cam)
+{
+    FontRenderer& font = FontRenderer::GetInstance();
+    uint32 origColour = font.GetColourABGR();
+    uint16 fh = font.GetFontHeight();
+    const Options& options = PicaSim::GetInstance().GetSettings().mOptions;
+
+    // --- centre reticle + artificial horizon (GL lines) ---
+    {
+        DisableDepthTest disableDepthTest;
+        DisableDepthMask disableDepthMask;
+        EnableBlend enableBlend;
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        float cx = vp[0] + vp[2] * 0.5f;
+        float cy = vp[1] + vp[3] * 0.5f;
+        float H = (float)vp[3];
+
+        // Attitude from the aircraft frame (X fwd, Y left, Z up).
+        const Transform& tm = a->GetTransform();
+        Vector3 fwd = tm.RowX(), up = tm.RowZ(), left = tm.RowY();
+        float pitch = asinf(ClampToRange(fwd.z, -1.0f, 1.0f));
+        float roll  = atan2f(-left.z, up.z);
+        float vfov = cam->GetVerticalFOV();
+        if (vfov < 0.1f) vfov = 1.0f;
+        float horizonY = cy - (pitch / vfov) * H;   // nose-up pushes the horizon down
+        float ca = cosf(roll), sa = sinf(roll);
+
+        std::vector<GLfloat> pts;
+        auto seg = [&](float x0, float y0, float x1, float y1) {
+            pts.push_back(x0); pts.push_back(y0); pts.push_back(0);
+            pts.push_back(x1); pts.push_back(y1); pts.push_back(0);
+        };
+        // horizon endpoints are rotated by roll about (cx, horizonY)
+        auto rot = [&](float x, float y, float& ox, float& oy) {
+            ox = cx + x * ca - y * sa; oy = horizonY + x * sa + y * ca;
+        };
+
+        float s = H / 720.0f;               // scale reticle with resolution
+        float g = 7 * s, arm = 15 * s;
+        seg(cx - g - arm, cy, cx - g, cy);  seg(cx + g, cy, cx + g + arm, cy);
+        seg(cx, cy - g - arm, cx, cy - g);  seg(cx, cy + g, cx, cy + g + arm);
+
+        float hw = vp[2] * 0.40f, hg = 45 * s, tick = 9 * s;
+        float ax, ay, bx, by;
+        rot(-hw, 0, ax, ay); rot(-hg, 0, bx, by); seg(ax, ay, bx, by);
+        rot( hg, 0, ax, ay); rot( hw, 0, bx, by); seg(ax, ay, bx, by);
+        rot(-hw, 0, ax, ay); rot(-hw, -tick, bx, by); seg(ax, ay, bx, by);
+        rot( hw, 0, ax, ay); rot( hw, -tick, bx, by); seg(ax, ay, bx, by);
+
+        const ControllerShader* shader = (ControllerShader*) ShaderManager::GetInstance().GetShader(SHADER_CONTROLLER);
+        shader->Use();
+        gStreamVBO.Bind();
+        size_t off = gStreamVBO.Upload(pts.data(), pts.size() * sizeof(GLfloat));
+        glVertexAttribPointer(shader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)off);
+        glEnableVertexAttribArray(shader->a_position);
+        glUniform4f(shader->u_colour, 1.0f, 1.0f, 1.0f, 0.85f);
+        esSetModelViewProjectionMatrix(shader->u_mvpMatrix);
+        glDrawArrays(GL_LINES, 0, (GLsizei)(pts.size() / 3));
+        glDisableVertexAttribArray(shader->a_position);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    // --- corner readouts ---
+    int16 topY = (int16)(dc.mBottom + fh / 4);
+    int16 botY = (int16)(dc.mBottom + dc.mHeight - fh * 5 / 4);
+    int16 pad  = (int16)(fh / 2);
+    char t[64];
+    font.SetColourABGR(0xffffffff);
+
+    font.SetRect((int16)(dc.mLeft + pad), topY, (int16)dc.mWidth, fh);
+    font.SetAlignmentHor(FONT_ALIGN_LEFT);
+    font.RenderText("FPV");
+
+    float ft = a->GetFlightTime();
+    int mn = (int)(ft / 60.0f); float scs = ft - mn * 60.0f;
+    if (mn > 0) snprintf(t, sizeof(t), "%d:%04.1f", mn, scs); else snprintf(t, sizeof(t), "%4.1f", scs);
+    font.SetRect(dc.mLeft, topY, (int16)(dc.mWidth - pad), fh);
+    font.SetAlignmentHor(FONT_ALIGN_RIGHT);
+    font.RenderText(t);
+
+    float z = a->GetTransform().GetTrans().z;
+    float launchZ = PicaSim::GetInstance().GetObserver().GetTransform().GetTrans().z;
+    snprintf(t, sizeof(t), "ALT %4.0f%s", GetDistance(options, z - launchZ), GetDistanceUnitText(options));
+    font.SetRect((int16)(dc.mLeft + pad), botY, (int16)dc.mWidth, fh);
+    font.SetAlignmentHor(FONT_ALIGN_LEFT);
+    font.RenderText(t);
+
+    float spd = a->GetVelocity().GetLength();
+    snprintf(t, sizeof(t), "%4.0f%s", GetSpeed(options, spd), GetSpeedUnitText(options));
+    font.SetRect(dc.mLeft, botY, (int16)(dc.mWidth - pad), fh);
+    font.SetAlignmentHor(FONT_ALIGN_RIGHT);
+    font.RenderText(t);
+
+    font.SetColourABGR(origColour);
+}
+
 void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
 {
     TRACE_METHOD_ONLY(2);
     const GameSettings& gs = PicaSim::GetInstance().GetSettings();
     const Options& options = gs.mOptions;
+
+    // FPV OSD when flying from the onboard (aeroplane) camera.
+    if (PicaSim::GetInstance().GetShowUI())
+    {
+        const Camera* cam = PicaSim::GetInstance().GetMainViewport().GetCamera();
+        if (cam && cam->GetUserData() == (void*) CAMERA_AEROPLANE)
+        {
+            const Aeroplane* a = dynamic_cast<const Aeroplane*>(cam->GetCameraTarget());
+            if (!a) a = mAeroplane;
+            if (a && !a->GetCrashed())
+            {
+                DrawFpvOsd(displayConfig, a, cam);
+                return;
+            }
+        }
+    }
     if (
         !options.mFreeFlightDisplayAltitude && 
         !options.mFreeFlightDisplayDistance && 

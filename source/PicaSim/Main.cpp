@@ -267,6 +267,11 @@ int main(int argc, char* argv[])
             {
                 PicaSim::SetBootPaused(true);
             }
+            // --fpv: start in the onboard/FPV camera view (shows the FPV OSD).
+            else if (strcmp(argv[i], "--fpv") == 0)
+            {
+                PicaSim::SetBootFpv(true);
+            }
         }
         if (screenshotFrame > 0)
             Window::SetAutoScreenshot(screenshotFrame, screenshotFile);
