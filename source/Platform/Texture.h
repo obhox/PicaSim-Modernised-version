@@ -56,6 +56,14 @@ public:
         bool LoadFromFile(const char* filename);
 
         /**
+          * Load image from an in-memory encoded buffer (PNG/JPG/etc bytes) using
+          * stb_image. Used for glTF textures embedded in a GLB buffer view or a
+          * base64 data URI.
+          * @return true on success
+          */
+        bool LoadFromMemory(const unsigned char* data, int size);
+
+        /**
           * Set image dimensions and format (for manual buffer management)
           */
         void SetFormat(TextureFormat::Type format) { mFormat = format; }

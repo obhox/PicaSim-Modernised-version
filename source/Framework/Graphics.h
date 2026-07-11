@@ -130,6 +130,10 @@ inline void ConvertGLMat44ToTransform(const GLMat44& mat44, Transform& tm)
 /// Loads an image into the texture, making sure that if it's too big then it gets scaled down safely.
 /// colourOffset adjusts the HSV result - modifying H.
 void LoadTextureFromFile(Texture& texture, const char* filename, float colourOffset = 0.0f);
+// Decode an in-memory encoded image (PNG/JPG bytes) into the texture, sharing the
+// colour-offset + downscale processing with LoadTextureFromFile. For glTF textures
+// embedded in a GLB buffer view or a base64 data URI.
+void LoadTextureFromMemory(Texture& texture, const unsigned char* data, int size, float colourOffset = 0.0f, const char* nameForTrace = 0);
 
 /// \brief Load a shader, check for compile errors, print error messages to output log
 /// \param type Type of shader (GL_VERTEX_SHADER or GL_FRAGMENT_SHADER)

@@ -311,6 +311,48 @@ Texture* RenderModel::getTextureID(const std::string& textureName, const std::st
 }
 
 //======================================================================================================================
+Texture* RenderModel::getTextureFromSource(const GltfImageSource& src, bool rgb565, float colourOffset)
+{
+    if (src.empty())
+        return 0;
+
+    Textures::iterator it = mTextures.find(src.mName);
+    if (it != mTextures.end())
+        return it->second;
+
+    Texture* texture = new Texture;
+    if (!src.mPath.empty())
+        LoadTextureFromFile(*texture, src.mPath.c_str(), colourOffset);
+    else
+        LoadTextureFromMemory(*texture, &src.mBytes[0], (int) src.mBytes.size(), colourOffset, src.mName.c_str());
+
+    texture->SetClamping(false);
+    texture->SetMipMapping(true);   // Texture::Upload generates mips + anisotropy
+    texture->SetModifiable(false);
+    if (rgb565)
+        texture->SetFormatHW(CIwImage::RGB_565);
+    texture->Upload();
+
+    if (texture->GetFlags() & Texture::UPLOADED_F)
+    {
+        glBindTexture(GL_TEXTURE_2D, texture->mHWID);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    }
+    else
+    {
+        TRACE_FILE_IF(1) TRACE("Failed to upload glTF texture %s", src.mName.c_str());
+        delete texture;
+        return 0;
+    }
+
+    mTextures[src.mName] = texture;
+    return texture;
+}
+
+//======================================================================================================================
 // Per-triangle tangent from vertex positions + UVs (standard Lengyel formulation).
 // Returns a unit tangent in the same space as the positions; the shader re-
 // orthogonalises it against the interpolated normal, so a flat per-triangle
@@ -562,12 +604,15 @@ void RenderModel::Init(const GltfModelData& data, bool cullBackFaces, bool rgb56
         mComponents.push_back(Component(src.mName));
         Component* component = &mComponents.back();
 
-        if (!src.mTexturePath.empty())
+        if (!src.mBaseColor.empty())
         {
-            // Pass the already-resolved path as the texture name with an empty
-            // model file so getTextureID uses it verbatim.
-            component->mTexture = getTextureID(src.mTexturePath, "", rgb565, colourOffset);
-            component->mTextureName = src.mTexturePath;
+            component->mTexture = getTextureFromSource(src.mBaseColor, rgb565, colourOffset);
+            component->mTextureName = src.mBaseColor.mName;
+        }
+        if (!src.mNormal.empty())
+        {
+            // Normal maps encode vectors: no HSV colour offset and no RGB565.
+            component->mNormalTexture = getTextureFromSource(src.mNormal, false, 0.0f);
         }
 
         component->mTexturedVertices = src.mTexturedVertices;

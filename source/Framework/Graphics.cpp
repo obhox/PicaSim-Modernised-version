@@ -311,22 +311,18 @@ void LookAt(
 }
 
 //======================================================================================================================
-void LoadTextureFromFile(Texture& texture, const char* filename, float colourOffset)
+// Shared processing for a freshly-decoded Image: optional HSV colour offset, then
+// downscale to the GL max texture size, then copy into the Texture. Used by both
+// the file and in-memory (glTF-embedded) texture loaders. 'name' is for tracing.
+static void ProcessLoadedImage(Texture& texture, Image& image, float colourOffset, const char* name)
 {
-    Image image;
-    if (!image.LoadFromFile(filename))
-    {
-        TRACE_FILE_IF(1) TRACE("Failed to load image: %s", filename);
-        return;
-    }
-
     GLint maxTextureSize;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
     GLint origWidth = image.GetWidth();
     GLint origHeight = image.GetHeight();
     int channels = image.GetChannels();
 
-    TRACE_FILE_IF(1) TRACE("Image %s size %d, %d channels %d", filename, origWidth, origHeight, channels);
+    TRACE_FILE_IF(1) TRACE("Image %s size %d, %d channels %d", name, origWidth, origHeight, channels);
 
     // Apply colour offset if requested (assumes RGB or RGBA data)
     if (colourOffset != 0.0f && channels >= 3)
@@ -369,7 +365,7 @@ void LoadTextureFromFile(Texture& texture, const char* filename, float colourOff
         newHeight = maxTextureSize;
         newWidth = (origWidth * maxTextureSize) / origHeight;
     }
-    TRACE_FILE_IF(1) TRACE("Resizing texture %s to %d, %d", filename, newWidth, newHeight);
+    TRACE_FILE_IF(1) TRACE("Resizing texture %s to %d, %d", name, newWidth, newHeight);
 
     Image newImage;
     newImage.SetFormat(image.GetFormat());
@@ -378,6 +374,28 @@ void LoadTextureFromFile(Texture& texture, const char* filename, float colourOff
     image.ConvertToImage(&newImage);
 
     texture.CopyFromImage(&newImage);
+}
+
+void LoadTextureFromFile(Texture& texture, const char* filename, float colourOffset)
+{
+    Image image;
+    if (!image.LoadFromFile(filename))
+    {
+        TRACE_FILE_IF(1) TRACE("Failed to load image: %s", filename);
+        return;
+    }
+    ProcessLoadedImage(texture, image, colourOffset, filename);
+}
+
+void LoadTextureFromMemory(Texture& texture, const unsigned char* data, int size, float colourOffset, const char* nameForTrace)
+{
+    Image image;
+    if (!image.LoadFromMemory(data, size))
+    {
+        TRACE_FILE_IF(1) TRACE("Failed to decode embedded image: %s", nameForTrace ? nameForTrace : "");
+        return;
+    }
+    ProcessLoadedImage(texture, image, colourOffset, nameForTrace ? nameForTrace : "embedded");
 }
 
 //======================================================================================================================

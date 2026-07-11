@@ -111,17 +111,30 @@ public:
     };
     typedef std::vector<TexturedVertex> TexturedVertices;
 
+    // A glTF image resolved to either an external file path or in-memory encoded
+    // bytes (GLB buffer view / base64 data URI). Exactly one of mPath / mBytes is
+    // populated when non-empty(); mName is a stable cache key + trace label.
+    struct GltfImageSource
+    {
+        std::string                mName;   // cache key / trace label
+        std::string                mPath;   // non-empty => load from file
+        std::vector<unsigned char> mBytes;  // non-empty => decode from memory
+        bool empty() const { return mPath.empty() && mBytes.empty(); }
+    };
+
     // Neutral intermediate produced by the glTF loader (GltfLoader.cpp). It is
     // deliberately free of any cgltf dependency so RenderModel does not need to
     // know about the glTF library. Each entry becomes one RenderModel::Component.
     // Vertices are already in final PicaSim model space (axis-converted, node
-    // transforms baked, scaled and offset). mTexturePath, when non-empty, is a
-    // ready-to-load image path (loaded via the same Texture path as AC3D).
+    // transforms baked, scaled and offset). mBaseColor/mNormal, when non-empty, are
+    // ready-to-load images (file path or embedded bytes); mNormal drives normal
+    // mapping via the same tangent/TBN path as the AC3D Materials.xml normalMap.
     struct GltfComponentData
     {
         GltfComponentData() : mRoughness(0.6f), mMetallic(0.0f) {}
         std::string        mName;
-        std::string        mTexturePath;   // "" => untextured (uses vertex colour)
+        GltfImageSource    mBaseColor;      // empty() => untextured (uses vertex colour)
+        GltfImageSource    mNormal;         // empty() => no normal map
         UntexturedVertices mUntexturedVertices;
         TexturedVertices   mTexturedVertices;
         float              mRoughness;
@@ -157,6 +170,11 @@ private:
     /// Loads or returns a loaded/cached texture using the textureName and path from modelFile. 
     /// Converts to RGB565 if necessary, and also applies a HSV colour offset if desired.
     Texture* getTextureID(const std::string& textureName, const std::string& modelFile, bool rgb565, float colourOffset);
+
+    /// Loads or returns a cached texture from a glTF image source (external file
+    /// path or in-memory encoded bytes for GLB / data-URI images), keyed by
+    /// src.mName. Same upload/mipmap/filtering path as getTextureID.
+    Texture* getTextureFromSource(const GltfImageSource& src, bool rgb565, float colourOffset);
 
     Components mComponents;
     bool mCullBackFaces;

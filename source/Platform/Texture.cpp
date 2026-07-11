@@ -94,6 +94,40 @@ bool Image::LoadFromFile(const char* filename)
     return true;
 }
 
+bool Image::LoadFromMemory(const unsigned char* data, int size)
+{
+    Release();
+
+    if (!data || size <= 0)
+        return false;
+
+    int width, height, channels;
+    unsigned char* pixels = stbi_load_from_memory(data, size, &width, &height, &channels, 0);
+    if (!pixels)
+    {
+        fprintf(stderr, "Failed to decode image from memory (%d bytes) - %s\n", size, stbi_failure_reason());
+        return false;
+    }
+
+    mData = pixels;
+    mWidth = width;
+    mHeight = height;
+    mChannels = channels;
+    mDataSize = width * height * channels;
+    mOwnsData = true;
+
+    switch (channels)
+    {
+    case 1: mFormat = TextureFormat::Luminance_8;      break;
+    case 2: mFormat = TextureFormat::LuminanceAlpha_88; break;
+    case 3: mFormat = TextureFormat::RGB_888;          break;
+    case 4: mFormat = TextureFormat::RGBA_8888;        break;
+    default: mFormat = TextureFormat::Unknown;         break;
+    }
+
+    return true;
+}
+
 void Image::SetBuffers(unsigned char* data, int dataSize)
 {
     // Don't free existing data if we owned it - caller is taking over
