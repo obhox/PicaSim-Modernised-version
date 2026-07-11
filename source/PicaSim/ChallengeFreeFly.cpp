@@ -343,6 +343,127 @@ static void DrawFpvOsd(DisplayConfig& dc, const Aeroplane* a, const Camera* cam)
     font.SetColourABGR(origColour);
 }
 
+//======================================================================================================================
+// One metric in the flight-data card: a dim label above a bright value.
+struct FlightCell
+{
+    const char* label;
+    char        value[24];
+    uint32      labelCol;
+    uint32      valueCol;
+};
+
+// Fill a screen-space rectangle (x,y from the top-left, y growing down) with a
+// solid colour, using the same ControllerShader path as the rest of the HUD.
+static void FillHudRect(float x, float y, float w, float h, float r, float g, float b, float a, int viewportHeight)
+{
+    float glY0 = viewportHeight - (y + h);
+    float glY1 = viewportHeight - y;
+    GLfloat pts[] = {
+        x,     glY0, 0,
+        x + w, glY0, 0,
+        x + w, glY1, 0,
+        x,     glY1, 0,
+    };
+    const ControllerShader* shader = (ControllerShader*) ShaderManager::GetInstance().GetShader(SHADER_CONTROLLER);
+    shader->Use();
+    gStreamVBO.Bind();
+    size_t off = gStreamVBO.Upload(pts, sizeof(pts));
+    glVertexAttribPointer(shader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)off);
+    glEnableVertexAttribArray(shader->a_position);
+    glUniform4f(shader->u_colour, r, g, b, a);
+    esSetModelViewProjectionMatrix(shader->u_mvpMatrix);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    glDisableVertexAttribArray(shader->a_position);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+// Draw the flight data as a horizontal card of labelled cells, centred at the top
+// (or bottom) of the display. A solid panel + amber top rule + thin cell dividers
+// make it read clearly over any scenery.
+static void DrawFlightDataCard(DisplayConfig& dc, const FlightCell* cells, int n, bool atTop)
+{
+    if (n <= 0)
+        return;
+
+    FontRenderer& font = FontRenderer::GetInstance();
+    uint32 origColour = font.GetColourABGR();
+    float fh = (float) font.GetFontHeight();
+    const float charW   = fh * 0.5f;   // matches the HUD's own width estimate
+    const float padX    = fh * 0.7f;   // panel inner horizontal padding
+    const float padY    = fh * 0.5f;   // panel inner vertical padding
+    const float cellGap = fh * 0.9f;   // space between cells
+    const float cellPad = charW;       // padding inside each cell
+    const float rowGap  = fh * 0.15f;  // gap between label row and value row
+
+    float cellW[8];
+    float contentW = 0.0f;
+    for (int i = 0 ; i < n ; ++i)
+    {
+        int lc = (int) strlen(cells[i].label);
+        int vc = (int) strlen(cells[i].value);
+        int mc = lc > vc ? lc : vc;
+        cellW[i] = mc * charW + cellPad * 2.0f;
+        contentW += cellW[i];
+        if (i)
+            contentW += cellGap;
+    }
+
+    float cardW = contentW + padX * 2.0f;
+    float cardH = padY * 2.0f + fh * 2.0f + rowGap;
+    float cardX = dc.mLeft + (dc.mWidth - cardW) * 0.5f;
+    float cardY = atTop ? (dc.mBottom + fh * 0.5f)
+                        : (dc.mBottom + dc.mHeight - cardH - fh * 0.6f);
+
+    // Draw the panel and its text together with depth test off, so the 2D card
+    // always overlays the scene and the glyphs sit on top of the panel.
+    GLint vp[4];
+    glGetIntegerv(GL_VIEWPORT, vp);
+    int vh = vp[3];
+
+    float labelY = cardY + padY;
+    float valueY = labelY + fh + rowGap;
+
+    {
+        DisableDepthTest disableDepthTest;
+        DisableDepthMask disableDepthMask;
+        EnableBlend enableBlend;
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        float shadow = Maximum(3.0f, fh * 0.12f);
+        FillHudRect(cardX + shadow, cardY + shadow, cardW, cardH, 0.0f, 0.0f, 0.0f, 0.35f, vh); // drop shadow
+        FillHudRect(cardX, cardY, cardW, cardH, 0.07f, 0.08f, 0.10f, 0.82f, vh);                // panel
+        FillHudRect(cardX, cardY, cardW, Maximum(2.0f, fh * 0.11f), 1.0f, 0.62f, 0.14f, 0.95f, vh); // amber top rule
+
+        {
+            float x = cardX + padX;
+            for (int i = 0 ; i < n ; ++i)
+            {
+                if (i)
+                    FillHudRect(x - cellGap * 0.5f, cardY + padY, 1.0f, fh * 2.0f + rowGap, 1.0f, 1.0f, 1.0f, 0.10f, vh);
+                x += cellW[i] + cellGap;
+            }
+        }
+
+        // --- text (still inside the depth-disabled scope) ---
+        font.SetAlignmentHor(FONT_ALIGN_CENTRE);
+        float x = cardX + padX;
+        for (int i = 0 ; i < n ; ++i)
+        {
+            font.SetColourABGR(cells[i].labelCol);
+            font.SetRect((int16)x, (int16)labelY, (int16)cellW[i], (int16)fh);
+            font.RenderText(cells[i].label);
+
+            font.SetColourABGR(cells[i].valueCol);
+            font.SetRect((int16)x, (int16)valueY, (int16)cellW[i], (int16)fh);
+            font.RenderText(cells[i].value);
+
+            x += cellW[i] + cellGap;
+        }
+    }
+    font.SetColourABGR(origColour);
+}
+
 void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
 {
     TRACE_METHOD_ONLY(2);
@@ -382,18 +503,10 @@ void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
 
     FontRenderer& font = FontRenderer::GetInstance();
     uint32 origColour = font.GetColourABGR();
-
     uint16 fontHeight = font.GetFontHeight();
-    int16 textRectY;
-    if (PicaSim::GetInstance().GetStatus() == PicaSim::STATUS_FLYING && options.mFreeFlightTextAtTop)
-        textRectY = displayConfig.mBottom + fontHeight*1/4;
-    else
-        textRectY = (int16)(displayConfig.mBottom + displayConfig.mHeight - fontHeight*5/4);
-    font.SetRect(displayConfig.mLeft, textRectY, (int16)displayConfig.mWidth, fontHeight);
-    font.SetAlignmentHor(FONT_ALIGN_CENTRE);
+    IwChar txt[64] = ""; // reused by the FPS readout below
 
-    IwChar txt[256] = "";
-    size_t txtLen = 0;
+    bool atTop = (PicaSim::GetInstance().GetStatus() == PicaSim::STATUS_FLYING && options.mFreeFlightTextAtTop);
 
     const CameraTarget* cameraTarget = PicaSim::GetInstance().GetMainViewport().GetCamera()->GetCameraTarget();
     const Aeroplane* aeroplane = dynamic_cast<const Aeroplane*>(cameraTarget);
@@ -402,139 +515,103 @@ void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
     if (!aeroplane)
         aeroplane = mAeroplane;
 
+    // Build one cell per enabled metric, then draw them all as a single card.
+    const uint32 kLabelCol = 0xffb9afaa; // dim warm grey (ABGR)
+    const uint32 kValueCol = 0xffffffff; // white
+    FlightCell cells[8];
+    int numCells = 0;
+
     int crashFlags = aeroplane->GetCrashFlags();
     if (crashFlags)
     {
         Language language = options.mLanguage;
-        txtLen = snprintf(txt, sizeof(txt), "%s:", TXT(PS_CRASHED));
-        if (txtLen < sizeof(txt))
-        {
-            if (crashFlags & Aeroplane::CRASHFLAG_AIRFRAME)
-                txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, " %s", TXT(PS_AIRFRAME));
-            if (txtLen < sizeof(txt) && (crashFlags & Aeroplane::CRASHFLAG_PROPELLER))
-                txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, " %s", TXT(PS_PROPELLER));
-            if (txtLen < sizeof(txt) && (crashFlags & Aeroplane::CRASHFLAG_UNDERCARRIAGE))
-                txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, " %s", TXT(PS_UNDERCARRIAGE));
-        }
-        font.SetColourABGR(0xff0000ff);
+        FlightCell& c = cells[numCells++];
+        c.label = TXT(PS_CRASHED);
+        c.labelCol = 0xff3838ff; // red
+        c.valueCol = 0xff5c5cff;
+        size_t vl = 0;
+        c.value[0] = 0;
+        if (crashFlags & Aeroplane::CRASHFLAG_AIRFRAME)
+            vl += snprintf(c.value + vl, sizeof(c.value) - vl, "%s ", TXT(PS_AIRFRAME));
+        if (vl < sizeof(c.value) && (crashFlags & Aeroplane::CRASHFLAG_PROPELLER))
+            vl += snprintf(c.value + vl, sizeof(c.value) - vl, "%s ", TXT(PS_PROPELLER));
+        if (vl < sizeof(c.value) && (crashFlags & Aeroplane::CRASHFLAG_UNDERCARRIAGE))
+            vl += snprintf(c.value + vl, sizeof(c.value) - vl, "%s ", TXT(PS_UNDERCARRIAGE));
     }
     else
     {
+        float ascentRate = aeroplane->GetVelocity().z;
+        mSmoothedAscentRate += (ascentRate - mSmoothedAscentRate) * 0.01f;
+
         if (options.mFreeFlightDisplayTime)
         {
             float flightTime = aeroplane->GetFlightTime();
             int minutes = (int) (flightTime / 60.0f);
             float seconds = flightTime - minutes * 60.0f;
+            FlightCell& c = cells[numCells++];
+            c.label = "TIME"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
             if (minutes > 0)
-                txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, "%dm%04.1fs", minutes, seconds);
+                snprintf(c.value, sizeof(c.value), "%d:%04.1f", minutes, seconds);
             else
-                txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, "%4.1fs", seconds);
+                snprintf(c.value, sizeof(c.value), "%.1fs", seconds);
         }
-
-        if (txtLen < sizeof(txt) && options.mFreeFlightDisplaySpeed)
+        if (numCells < 8 && options.mFreeFlightDisplaySpeed)
         {
             float speed = aeroplane->GetVelocity().GetLength();
-            txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, "  %5.1f%s", GetSpeed(options, speed), GetSpeedUnitText(options));
+            FlightCell& c = cells[numCells++];
+            c.label = "GND"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            snprintf(c.value, sizeof(c.value), "%.1f%s", GetSpeed(options, speed), GetSpeedUnitText(options));
         }
-
-        if (txtLen < sizeof(txt) && options.mFreeFlightDisplayAirSpeed)
+        if (numCells < 8 && options.mFreeFlightDisplayAirSpeed)
         {
             Vector3 windVel = Environment::GetInstance().GetWindAtPosition(aeroplane->GetTransform().GetTrans(), Environment::WIND_TYPE_SMOOTH | Environment::WIND_TYPE_GUSTY);
             float speed = (aeroplane->GetVelocity() - windVel).GetLength();
-            txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, "  %5.1f%s", GetSpeed(options, speed), GetSpeedUnitText(options));
+            FlightCell& c = cells[numCells++];
+            c.label = "AIR"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            snprintf(c.value, sizeof(c.value), "%.1f%s", GetSpeed(options, speed), GetSpeedUnitText(options));
         }
-
-        if (txtLen < sizeof(txt) && options.mFreeFlightDisplayMaxSpeed)
+        if (numCells < 8 && options.mFreeFlightDisplayMaxSpeed)
         {
-            txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, "  (max %5.1f%s)", GetSpeed(options, mMaxSpeed), GetSpeedUnitText(options));
+            FlightCell& c = cells[numCells++];
+            c.label = "MAX"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            snprintf(c.value, sizeof(c.value), "%.1f%s", GetSpeed(options, mMaxSpeed), GetSpeedUnitText(options));
         }
-
-        float ascentRate = aeroplane->GetVelocity().z;
-        mSmoothedAscentRate += (ascentRate - mSmoothedAscentRate) * 0.01f;
-        if (txtLen < sizeof(txt) && options.mFreeFlightDisplayAscentRate)
+        if (numCells < 8 && options.mFreeFlightDisplayAscentRate)
         {
-            txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, "  %5.2f%s",
-                GetAscentRate(options, ascentRate), GetAscentRateUnitText(options));
+            FlightCell& c = cells[numCells++];
+            c.label = "VARIO"; c.labelCol = kLabelCol;
+            snprintf(c.value, sizeof(c.value), "%.2f%s", GetAscentRate(options, ascentRate), GetAscentRateUnitText(options));
+            if (options.mFreeFlightColourText)
+            {
+                // 1 is up, 0 is down -> red..green
+                float aa = ClampToRange(0.5f + ascentRate / 12.0f, 0.0f, 1.0f);
+                int r = ClampToRange((int) ((1.0f - aa) * 255.0f), 0, 255);
+                int g = ClampToRange((int) (aa * 255.0f), 0, 255);
+                c.valueCol = 0xff000000 | (g << 8) | r;
+            }
+            else
+            {
+                c.valueCol = kValueCol;
+            }
         }
-
-        if (txtLen < sizeof(txt) && options.mFreeFlightDisplayAltitude)
+        if (numCells < 8 && options.mFreeFlightDisplayAltitude)
         {
             float z = aeroplane->GetTransform().GetTrans().z;
             float launchZ = PicaSim::GetInstance().GetObserver().GetTransform().GetTrans().z;
-            txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, "  %5.1f%s", GetDistance(options, z - launchZ), GetDistanceUnitText(options));
+            FlightCell& c = cells[numCells++];
+            c.label = "ALT"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            snprintf(c.value, sizeof(c.value), "%.1f%s", GetDistance(options, z - launchZ), GetDistanceUnitText(options));
         }
-
-        if (txtLen < sizeof(txt) && options.mFreeFlightDisplayDistance)
+        if (numCells < 8 && options.mFreeFlightDisplayDistance)
         {
             Vector3 delta = aeroplane->GetTransform().GetTrans() - PicaSim::GetInstance().GetObserver().GetTransform().GetTrans();
-            float dist = delta.GetLength();
-            txtLen += snprintf(txt + txtLen, sizeof(txt) - txtLen, "  %5.1f%s", GetDistance(options, dist), GetDistanceUnitText(options));
-        }
-
-        if (options.mFreeFlightColourText)
-        {
-            // 1 is up, 0 is down
-            float ascentAmount = ClampToRange(0.5f + ascentRate / 12.0f, 0.0f, 1.0f);
-            int r = ClampToRange((int) ((1.0f - ascentAmount)*255.0f), 0, 255);
-            int g = ClampToRange((int) (ascentAmount * 255.0f), 0, 255);
-            int b = 0;  
-            int32 col = r + (g << 8) + (b << 16) + (255 << 24);
-            font.SetColourABGR(col);
-        }
-        else
-        {
-            font.SetColourABGR(0xff000000);
+            FlightCell& c = cells[numCells++];
+            c.label = "DIST"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            snprintf(c.value, sizeof(c.value), "%.1f%s", GetDistance(options, delta.GetLength()), GetDistanceUnitText(options));
         }
     }
 
-    // Text background
-    if (options.mFreeFlightTextBackgroundOpacity > 0.0f)
-    {
-        uint32 w = displayConfig.mWidth;
-        uint32 rectW = strlen(txt) * fontHeight * 1 / 2;
-        uint32 rectX = (w - rectW) / 2;
-        float c = options.mFreeFlightTextBackgroundColour;
-        float a = options.mFreeFlightTextBackgroundOpacity;
-
-        // Draw filled rectangle using OpenGL
-        DisableDepthTest disableDepthTest;
-        DisableDepthMask disableDepthMask;
-        EnableBlend enableBlend;
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        // Get viewport height for coordinate conversion
-        GLint viewport[4];
-        glGetIntegerv(GL_VIEWPORT, viewport);
-        int viewportHeight = viewport[3];
-
-        // Convert from screen coordinates (Y=0 at top) to GL coordinates (Y=0 at bottom)
-        float x0 = (float)rectX;
-        float x1 = x0 + (float)rectW;
-        float y0 = (float)(viewportHeight - (textRectY + fontHeight));  // Bottom of rect in GL coords
-        float y1 = y0 + fontHeight * 1.2f;                              // Top of rect in GL coords
-
-        GLfloat pts[] = {
-            x0, y0, 0,
-            x1, y0, 0,
-            x1, y1, 0,
-            x0, y1, 0,
-        };
-
-        {
-            const ControllerShader* shader = (ControllerShader*) ShaderManager::GetInstance().GetShader(SHADER_CONTROLLER);
-            shader->Use();
-            gStreamVBO.Bind();
-            size_t posOffset = gStreamVBO.Upload(pts, sizeof(pts));
-            glVertexAttribPointer(shader->a_position, 3, GL_FLOAT, GL_FALSE, 0, (const GLvoid*)posOffset);
-            glEnableVertexAttribArray(shader->a_position);
-            glUniform4f(shader->u_colour, c, c, c, a);
-            esSetModelViewProjectionMatrix(shader->u_mvpMatrix);
-            glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-            glDisableVertexAttribArray(shader->a_position);
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-        }
-    }
-    font.RenderText(txt);
+    DrawFlightDataCard(displayConfig, cells, numCells, atTop);
 
     if (gs.mOptions.mDisplayFPS)
     {
