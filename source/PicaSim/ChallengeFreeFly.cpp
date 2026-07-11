@@ -351,6 +351,7 @@ struct FlightCell
     char        value[24];
     uint32      labelCol;
     uint32      valueCol;
+    int         reserve;   // fixed value-field width in chars (0 = size to the value)
 };
 
 // Fill a screen-space rectangle (x,y from the top-left, y growing down) with a
@@ -390,18 +391,22 @@ static void DrawFlightDataCard(DisplayConfig& dc, const FlightCell* cells, int n
     uint32 origColour = font.GetColourABGR();
     float fh = (float) font.GetFontHeight();
     const float charW   = fh * 0.5f;   // matches the HUD's own width estimate
-    const float padX    = fh * 0.7f;   // panel inner horizontal padding
+    const float padX    = fh * 0.55f;  // panel inner horizontal padding
     const float padY    = fh * 0.5f;   // panel inner vertical padding
-    const float cellGap = fh * 0.9f;   // space between cells
-    const float cellPad = charW;       // padding inside each cell
+    const float cellGap = fh * 0.5f;   // space between cells
+    const float cellPad = charW * 0.5f;// padding inside each cell
     const float rowGap  = fh * 0.15f;  // gap between label row and value row
 
+    // Each cell reserves a fixed value-field width (cells[i].reserve) so its size -
+    // and therefore the centred card's position - stays constant as the live values
+    // change digit count. Without this the card resizes and slides every frame at
+    // launch while the numbers ramp -> shake. reserve==0 sizes to the value (crash).
     float cellW[8];
     float contentW = 0.0f;
     for (int i = 0 ; i < n ; ++i)
     {
         int lc = (int) strlen(cells[i].label);
-        int vc = (int) strlen(cells[i].value);
+        int vc = cells[i].reserve > 0 ? cells[i].reserve : (int) strlen(cells[i].value);
         int mc = lc > vc ? lc : vc;
         cellW[i] = mc * charW + cellPad * 2.0f;
         contentW += cellW[i];
@@ -529,6 +534,7 @@ void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
         c.label = TXT(PS_CRASHED);
         c.labelCol = 0xff3838ff; // red
         c.valueCol = 0xff5c5cff;
+        c.reserve = 0; // size to the (static) crash text
         size_t vl = 0;
         c.value[0] = 0;
         if (crashFlags & Aeroplane::CRASHFLAG_AIRFRAME)
@@ -549,7 +555,7 @@ void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
             int minutes = (int) (flightTime / 60.0f);
             float seconds = flightTime - minutes * 60.0f;
             FlightCell& c = cells[numCells++];
-            c.label = "TIME"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            c.label = "TIME"; c.labelCol = kLabelCol; c.valueCol = kValueCol; c.reserve = 6;
             if (minutes > 0)
                 snprintf(c.value, sizeof(c.value), "%d:%04.1f", minutes, seconds);
             else
@@ -559,7 +565,7 @@ void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
         {
             float speed = aeroplane->GetVelocity().GetLength();
             FlightCell& c = cells[numCells++];
-            c.label = "GND"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            c.label = "GND"; c.labelCol = kLabelCol; c.valueCol = kValueCol; c.reserve = 9;
             snprintf(c.value, sizeof(c.value), "%.1f%s", GetSpeed(options, speed), GetSpeedUnitText(options));
         }
         if (numCells < 8 && options.mFreeFlightDisplayAirSpeed)
@@ -567,19 +573,19 @@ void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
             Vector3 windVel = Environment::GetInstance().GetWindAtPosition(aeroplane->GetTransform().GetTrans(), Environment::WIND_TYPE_SMOOTH | Environment::WIND_TYPE_GUSTY);
             float speed = (aeroplane->GetVelocity() - windVel).GetLength();
             FlightCell& c = cells[numCells++];
-            c.label = "AIR"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            c.label = "AIR"; c.labelCol = kLabelCol; c.valueCol = kValueCol; c.reserve = 9;
             snprintf(c.value, sizeof(c.value), "%.1f%s", GetSpeed(options, speed), GetSpeedUnitText(options));
         }
         if (numCells < 8 && options.mFreeFlightDisplayMaxSpeed)
         {
             FlightCell& c = cells[numCells++];
-            c.label = "MAX"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            c.label = "MAX"; c.labelCol = kLabelCol; c.valueCol = kValueCol; c.reserve = 9;
             snprintf(c.value, sizeof(c.value), "%.1f%s", GetSpeed(options, mMaxSpeed), GetSpeedUnitText(options));
         }
         if (numCells < 8 && options.mFreeFlightDisplayAscentRate)
         {
             FlightCell& c = cells[numCells++];
-            c.label = "VARIO"; c.labelCol = kLabelCol;
+            c.label = "VARIO"; c.labelCol = kLabelCol; c.reserve = 8;
             snprintf(c.value, sizeof(c.value), "%.2f%s", GetAscentRate(options, ascentRate), GetAscentRateUnitText(options));
             if (options.mFreeFlightColourText)
             {
@@ -599,14 +605,14 @@ void ChallengeFreeFly::GxRender(int renderLevel, DisplayConfig& displayConfig)
             float z = aeroplane->GetTransform().GetTrans().z;
             float launchZ = PicaSim::GetInstance().GetObserver().GetTransform().GetTrans().z;
             FlightCell& c = cells[numCells++];
-            c.label = "ALT"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            c.label = "ALT"; c.labelCol = kLabelCol; c.valueCol = kValueCol; c.reserve = 7;
             snprintf(c.value, sizeof(c.value), "%.1f%s", GetDistance(options, z - launchZ), GetDistanceUnitText(options));
         }
         if (numCells < 8 && options.mFreeFlightDisplayDistance)
         {
             Vector3 delta = aeroplane->GetTransform().GetTrans() - PicaSim::GetInstance().GetObserver().GetTransform().GetTrans();
             FlightCell& c = cells[numCells++];
-            c.label = "DIST"; c.labelCol = kLabelCol; c.valueCol = kValueCol;
+            c.label = "DIST"; c.labelCol = kLabelCol; c.valueCol = kValueCol; c.reserve = 8;
             snprintf(c.value, sizeof(c.value), "%.1f%s", GetDistance(options, delta.GetLength()), GetDistanceUnitText(options));
         }
     }
