@@ -436,7 +436,11 @@ void PicaSim::HandleMode()
         mViewport->GetCamera()->SetUserData((void*) CAMERA_AEROPLANE);
         mViewport->GetCamera()->SetCameraTransform(cameraAeroplane);
         mViewport->GetCamera()->SetCameraTarget(0);
-        mViewport->GetCamera()->SetVerticalFOV(DegreesToRadians(mGameSettings.mOptions.mAeroplaneViewFieldOfView));
+        // Onboard = the FPV view: widen the field of view (~1.3x, clamped) so it
+        // feels like a drone/action cam rather than a narrow cockpit. Zoom still
+        // scales it proportionally via mAeroplaneViewFieldOfView.
+        mViewport->GetCamera()->SetVerticalFOV(DegreesToRadians(
+            ClampToRange(mGameSettings.mOptions.mAeroplaneViewFieldOfView * 1.3f, 40.0f, 105.0f)));
         mViewport->GetCamera()->DisableAutoZoom();
 
         mZoomViewport->Enable(false);

@@ -264,10 +264,14 @@ static void DrawFpvOsd(DisplayConfig& dc, const Aeroplane* a, const Camera* cam)
         float cy = vp[1] + vp[3] * 0.5f;
         float H = (float)vp[3];
 
-        // Attitude from the aircraft frame (X fwd, Y left, Z up).
+        // Attitude from the aircraft frame (X fwd, Y left, Z up). The onboard
+        // camera is tilted up by the aircraft's cockpit-cam pitch, so add that to
+        // the nose elevation to get the camera's view elevation - this lands the
+        // artificial horizon on the real horizon.
         const Transform& tm = a->GetTransform();
         Vector3 fwd = tm.RowX(), up = tm.RowZ(), left = tm.RowY();
-        float pitch = asinf(ClampToRange(fwd.z, -1.0f, 1.0f));
+        float cockpit = DegreesToRadians(PicaSim::GetInstance().GetSettings().mAeroplaneSettings.mCockpitCamPitch);
+        float pitch = asinf(ClampToRange(fwd.z, -1.0f, 1.0f)) + cockpit;
         float roll  = atan2f(-left.z, up.z);
         float vfov = cam->GetVerticalFOV();
         if (vfov < 0.1f) vfov = 1.0f;
