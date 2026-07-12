@@ -139,6 +139,8 @@ public:
     /// Forces the in-flight telemetry window on regardless of the saved setting
     /// (used by the --telemetry CLI capture hook). Call before/after Init().
     static void SetForceTelemetry(bool force) { mForceTelemetry = force; }
+    static void SetBootPaused(bool p) { mBootPaused = p; }
+    static void SetBootFpv(bool f) { mBootFpv = f; }
 
     /// True if the telemetry window should be drawn (saved option OR CLI force).
     bool IsTelemetryEnabled() const { return mGameSettings.mOptions.mShowTelemetry || mForceTelemetry; }
@@ -225,6 +227,8 @@ private:
     // In-flight telemetry overlay (default off).
     TelemetryWindow mTelemetryWindow;
     static bool mForceTelemetry;
+    static bool mBootPaused;
+    static bool mBootFpv;
 
     // For when using the joystick
     bool mPrevJoystickRelaunch;

@@ -42,6 +42,8 @@ float numButtonSlots = 8.0f;
 PicaSim* PicaSim::mInstance = 0;
 std::string PicaSim::mBootGhostFile;
 bool PicaSim::mForceTelemetry = false;
+bool PicaSim::mBootPaused = false;
+bool PicaSim::mBootFpv = false;
 
 //======================================================================================================================
 PicaSim::PicaSim(GameSettings& gameSettings)
@@ -421,6 +423,8 @@ void PicaSim::HandleMode()
 {
     Mode origMode = mMode;
 
+    if (mBootFpv) mMode = MODE_AEROPLANE;  // dev capture hook (--fpv)
+
     if (mGameSettings.mEnvironmentSettings.mTerrainSettings.mType == TerrainSettings::TYPE_PANORAMA)
         mMode = MODE_GROUND;
 
@@ -432,7 +436,11 @@ void PicaSim::HandleMode()
         mViewport->GetCamera()->SetUserData((void*) CAMERA_AEROPLANE);
         mViewport->GetCamera()->SetCameraTransform(cameraAeroplane);
         mViewport->GetCamera()->SetCameraTarget(0);
-        mViewport->GetCamera()->SetVerticalFOV(DegreesToRadians(mGameSettings.mOptions.mAeroplaneViewFieldOfView));
+        // Onboard = the FPV view: widen the field of view (~1.3x, clamped) so it
+        // feels like a drone/action cam rather than a narrow cockpit. Zoom still
+        // scales it proportionally via mAeroplaneViewFieldOfView.
+        mViewport->GetCamera()->SetVerticalFOV(DegreesToRadians(
+            ClampToRange(mGameSettings.mOptions.mAeroplaneViewFieldOfView * 1.3f, 40.0f, 105.0f)));
         mViewport->GetCamera()->DisableAutoZoom();
 
         mZoomViewport->Enable(false);
@@ -788,6 +796,11 @@ PicaSim::UpdateResult PicaSim::Update(int64 deltaTimeMs)
 
     if (deltaTime > 0.1f)
         deltaTime = 0.1f;
+
+    // Dev capture hook: --paused forces the paused state so the full HUD button
+    // bar can be golden-screenshotted.
+    if (mBootPaused)
+        mStatus = STATUS_PAUSED;
 
     float gameDeltaTime = mStatus == STATUS_PAUSED ? 0.0f : deltaTime;
 

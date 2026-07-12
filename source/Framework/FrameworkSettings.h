@@ -41,6 +41,7 @@ struct FrameworkSettings
     float mExposure;
     bool  mFXAAEnabled;
     bool  mPBRTonemap;   // false => identity clamp (preserve LDR look); true => PBR Neutral tonemap
+    bool  mSSAO;         // screen-space ambient occlusion in the HDR resolve (opt-in)
 
     // PBR-lite aircraft-model shading (Cook-Torrance GGX + SH ambient). When
     // false the models fall back to the legacy Phong path. Forced off when
@@ -54,6 +55,11 @@ struct FrameworkSettings
     // is set. mCsmBias is the depth-compare bias for the CSM path (acne knob).
     int   mShadowMode;
     float mCsmBias;
+
+    // Anisotropic texture filtering level for 3D content (1 = off/isotropic, up to
+    // the driver max, typ. 16). Driven by the graphics-quality tier. Default 1 so
+    // the look is unchanged until a tier / user opts in.
+    int   mAnisotropy;
 
     // Enhanced water (Phase 5). Opt-in, default OFF so existing lake/plain scenes
     // render bit-for-bit unchanged (they keep using plain.frag). When true the

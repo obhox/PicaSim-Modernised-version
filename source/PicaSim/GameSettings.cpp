@@ -321,7 +321,8 @@ Options::Options() :
     mSmokeQuality(1.0f),
     mShowWindStreamlines(false),
     mShowThermals(false),
-    mShowTurbulence(false)
+    mShowTurbulence(false),
+    mGraphicsQuality(QUALITY_CUSTOM)
 {
     int32 memoryMB = Platform::GetSystemRAM();
     TRACE_FILE_IF(1) TRACE("Options: reported memory = %d MB", memoryMB);
@@ -343,6 +344,96 @@ Options::Options() :
 }
 
 //======================================================================================================================
+void Options::ApplyGraphicsQuality(GraphicsQuality quality)
+{
+    // QUALITY_CUSTOM just records that the user is hand-tuning; leave flags as-is.
+    if (quality == QUALITY_CUSTOM || quality >= QUALITY_MAX)
+    {
+        mGraphicsQuality = QUALITY_CUSTOM;
+        return;
+    }
+
+    FrameworkSettings& fs = mFrameworkSettings;
+
+    // Cascaded shadow maps are a desktop-only feature; clamp mobile down a tier so
+    // we never ask a phone/tablet to run CSM + bloom.
+    if (fs.isMobile() && quality > QUALITY_MEDIUM)
+        quality = QUALITY_MEDIUM;
+
+    switch (quality)
+    {
+    case QUALITY_LOW:
+        // Legacy escape hatch: skip the whole HDR/PBR/post pipeline, cheap blob
+        // shadow only. Matches the pre-modern-renderer look for weak hardware.
+        fs.mClassicRendering = true;
+        fs.mUsePBR           = false;
+        fs.mPBRTonemap       = false;
+        fs.mBloomEnabled     = false;
+        fs.mFXAAEnabled      = false;
+        fs.mShadowMode       = 0;
+        fs.mEnhancedWater    = false;
+        fs.mAnisotropy       = 1;
+        fs.mSSAO             = false;
+        mControlledPlaneShadows = BLOB;
+        mOtherShadows           = NONE;
+        break;
+
+    case QUALITY_MEDIUM:
+        // Modern shading (PBR + FXAA) but cheap blob shadows and no bloom/water.
+        fs.mClassicRendering = false;
+        fs.mUsePBR           = true;
+        fs.mPBRTonemap       = false;
+        fs.mBloomEnabled     = false;
+        fs.mFXAAEnabled      = true;
+        fs.mShadowMode       = 1;   // blob
+        fs.mEnhancedWater    = false;
+        fs.mAnisotropy       = 4;
+        fs.mSSAO             = false;
+        mControlledPlaneShadows = BLOB;
+        mOtherShadows           = BLOB;
+        break;
+
+    case QUALITY_HIGH:
+        // Full modern look: PBR + tonemap + bloom + FXAA + cascaded shadow maps +
+        // enhanced water. CSM casts the aircraft onto the terrain, so the legacy
+        // blob/projected plane shadows are forced off to avoid double shadows.
+        fs.mClassicRendering = false;
+        fs.mUsePBR           = true;
+        fs.mPBRTonemap       = true;
+        fs.mBloomEnabled     = true;
+        fs.mFXAAEnabled      = true;
+        fs.mShadowMode       = 2;   // CSM
+        fs.mEnhancedWater    = true;
+        fs.mAnisotropy       = 8;
+        fs.mSSAO             = true;
+        mControlledPlaneShadows = NONE;
+        mOtherShadows           = NONE;
+        break;
+
+    case QUALITY_ULTRA:
+        // Same feature set as High today (headroom for future extras such as
+        // higher CSM resolution / anisotropy in Phase 2).
+        fs.mClassicRendering = false;
+        fs.mUsePBR           = true;
+        fs.mPBRTonemap       = true;
+        fs.mBloomEnabled     = true;
+        fs.mFXAAEnabled      = true;
+        fs.mShadowMode       = 2;   // CSM
+        fs.mEnhancedWater    = true;
+        fs.mAnisotropy       = 16;
+        fs.mSSAO             = true;
+        mControlledPlaneShadows = NONE;
+        mOtherShadows           = NONE;
+        break;
+
+    default:
+        break;
+    }
+
+    mGraphicsQuality = quality;
+}
+
+//======================================================================================================================
 bool Options::WriteToDoc(TiXmlDocument& doc) const
 {
     TiXmlElement* element = new TiXmlElement( "Options" );
@@ -356,9 +447,15 @@ bool Options::WriteToDoc(TiXmlDocument& doc) const
     WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mExposure);
     WRITE_ATTRIBUTE(mFrameworkSettings.mFXAAEnabled);
     WRITE_ATTRIBUTE(mFrameworkSettings.mPBRTonemap);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mSSAO);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mUsePBR);
+    WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mSHAmbientScale);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mEnhancedWater);
     WRITE_ATTRIBUTE(mFrameworkSettings.mShadowMode);
     WRITE_DOUBLE_ATTRIBUTE(mFrameworkSettings.mCsmBias);
+    WRITE_ATTRIBUTE(mFrameworkSettings.mAnisotropy);
     WRITE_ATTRIBUTE(mFrameworkSettings.mCrashDamage);
+    WRITE_ATTRIBUTE(mGraphicsQuality);
     WRITE_DOUBLE_ATTRIBUTE(mLaunchSpeedScale);
     WRITE_DOUBLE_ATTRIBUTE(mLaunchAngleUpDelta);
     WRITE_DOUBLE_ATTRIBUTE(mBungeeTensionScale);
@@ -528,10 +625,20 @@ bool Options::ReadFromDoc(TiXmlDocument& doc, bool readAll)
     READ_ATTRIBUTE(mFrameworkSettings.mExposure);
     READ_ATTRIBUTE(mFrameworkSettings.mFXAAEnabled);
     READ_ATTRIBUTE(mFrameworkSettings.mPBRTonemap);
+    READ_ATTRIBUTE(mFrameworkSettings.mSSAO);
+    // Additive PBR / water flags - absent in older settings.xml, in which case the
+    // constructor defaults (PBR on, ambient scale 1, water off) are kept.
+    READ_ATTRIBUTE(mFrameworkSettings.mUsePBR);
+    READ_ATTRIBUTE(mFrameworkSettings.mSHAmbientScale);
+    READ_ATTRIBUTE(mFrameworkSettings.mEnhancedWater);
     // Additive shadow settings - absent in older settings.xml, so the constructor
     // default (mShadowMode = 1 = Blob) is kept and the current look is unchanged.
     READ_ATTRIBUTE(mFrameworkSettings.mShadowMode);
     READ_ATTRIBUTE(mFrameworkSettings.mCsmBias);
+    READ_ATTRIBUTE(mFrameworkSettings.mAnisotropy);
+    // Unified quality tier - absent in older settings.xml, defaults to CUSTOM so
+    // the individually-loaded flags above are respected as-is.
+    READ_ENUM_ATTRIBUTE(mGraphicsQuality);
     // Additive crash-damage + launch tunables - absent in older settings.xml, in
     // which case the constructor defaults (crash damage off, launch scales that
     // reproduce the previous behaviour) are kept, so old configs load unchanged.
@@ -672,6 +779,14 @@ bool Options::ReadFromDoc(TiXmlDocument& doc, bool readAll)
     }
 
     Upgrade(doc);
+
+    // If a concrete quality tier was loaded, re-derive the coherent renderer flag
+    // bundle from it. This lets a preset file (or a saved config) specify just
+    // mGraphicsQuality and get the matching feature-flags without listing them all.
+    // Hand-tweaked configs are saved as QUALITY_CUSTOM, so their individual flags
+    // are left untouched here.
+    if (mGraphicsQuality != QUALITY_CUSTOM && mGraphicsQuality < QUALITY_MAX)
+        ApplyGraphicsQuality(mGraphicsQuality);
 
     return true;
 }

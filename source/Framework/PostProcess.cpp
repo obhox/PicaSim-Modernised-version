@@ -34,6 +34,8 @@ void PostProcess::Init()
     mDownProgram    = CompileProgram("fullscreen.vert", "bloom_down.frag");
     mUpProgram      = CompileProgram("fullscreen.vert", "bloom_up.frag");
     mFxaaProgram    = CompileProgram("fullscreen.vert", "fxaa.frag");
+    mSsaoProgram    = CompileProgram("fullscreen.vert", "ssao.frag");
+    mAoBlurProgram  = CompileProgram("fullscreen.vert", "ssao_blur.frag");
 
     if (mTonemapProgram)
     {
@@ -44,6 +46,24 @@ void PostProcess::Init()
         u_exposure       = glGetUniformLocation(mTonemapProgram, "u_exposure");
         u_bloomIntensity = glGetUniformLocation(mTonemapProgram, "u_bloomIntensity");
         u_tonemap        = glGetUniformLocation(mTonemapProgram, "u_tonemap");
+        u_aoTexture      = glGetUniformLocation(mTonemapProgram, "u_aoTexture");
+        u_useAO          = glGetUniformLocation(mTonemapProgram, "u_useAO");
+    }
+    if (mSsaoProgram)
+    {
+        s_depthTex    = glGetUniformLocation(mSsaoProgram, "u_depthTex");
+        s_texelSize   = glGetUniformLocation(mSsaoProgram, "u_texelSize");
+        s_near        = glGetUniformLocation(mSsaoProgram, "u_near");
+        s_far         = glGetUniformLocation(mSsaoProgram, "u_far");
+        s_tanHalfFovY = glGetUniformLocation(mSsaoProgram, "u_tanHalfFovY");
+        s_aspect      = glGetUniformLocation(mSsaoProgram, "u_aspect");
+        s_radius      = glGetUniformLocation(mSsaoProgram, "u_radius");
+        s_intensity   = glGetUniformLocation(mSsaoProgram, "u_intensity");
+    }
+    if (mAoBlurProgram)
+    {
+        b_aoTex     = glGetUniformLocation(mAoBlurProgram, "u_aoTex");
+        b_texelSize = glGetUniformLocation(mAoBlurProgram, "u_texelSize");
     }
     if (mDownProgram)
     {
@@ -73,11 +93,93 @@ void PostProcess::Terminate()
 {
     DestroyBloomResources();
     DestroyLdrResources();
+    DestroyAoResources();
     if (mTonemapProgram) { glDeleteProgram(mTonemapProgram); mTonemapProgram = 0; }
     if (mDownProgram)    { glDeleteProgram(mDownProgram);    mDownProgram = 0; }
     if (mUpProgram)      { glDeleteProgram(mUpProgram);      mUpProgram = 0; }
     if (mFxaaProgram)    { glDeleteProgram(mFxaaProgram);    mFxaaProgram = 0; }
+    if (mSsaoProgram)    { glDeleteProgram(mSsaoProgram);    mSsaoProgram = 0; }
+    if (mAoBlurProgram)  { glDeleteProgram(mAoBlurProgram);  mAoBlurProgram = 0; }
     mInitialised = false;
+}
+
+//======================================================================================================================
+void PostProcess::DestroyAoResources()
+{
+    if (mAoFBO)     { glDeleteFramebuffers(1, &mAoFBO);     mAoFBO = 0; }
+    if (mAoTex)     { glDeleteTextures(1, &mAoTex);         mAoTex = 0; }
+    if (mAoBlurFBO) { glDeleteFramebuffers(1, &mAoBlurFBO); mAoBlurFBO = 0; }
+    if (mAoBlurTex) { glDeleteTextures(1, &mAoBlurTex);     mAoBlurTex = 0; }
+    mAoW = mAoH = 0;
+}
+
+//======================================================================================================================
+void PostProcess::EnsureAoResources(int w, int h)
+{
+    if (w == mAoW && h == mAoH && mAoFBO != 0)
+        return;
+    DestroyAoResources();
+    mAoW = w; mAoH = h;
+
+    GLuint* texs[2] = { &mAoTex, &mAoBlurTex };
+    GLuint* fbos[2] = { &mAoFBO, &mAoBlurFBO };
+    for (int i = 0; i < 2; ++i)
+    {
+        glGenTextures(1, texs[i]);
+        glBindTexture(GL_TEXTURE_2D, *texs[i]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        glGenFramebuffers(1, fbos[i]);
+        glBindFramebuffer(GL_FRAMEBUFFER, *fbos[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *texs[i], 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+}
+
+//======================================================================================================================
+GLuint PostProcess::RunSSAO(GLuint depthTex, int w, int h,
+                            float camNear, float camFar, float camTanHalfFovY, float camAspect,
+                            const PostSettings& settings)
+{
+    if (depthTex == 0 || mSsaoProgram == 0 || mAoBlurProgram == 0)
+        return 0;
+    EnsureAoResources(w, h);
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glActiveTexture(GL_TEXTURE0);
+
+    // --- SSAO pass: depth -> raw AO ---
+    glBindFramebuffer(GL_FRAMEBUFFER, mAoFBO);
+    glViewport(0, 0, w, h);
+    glUseProgram(mSsaoProgram);
+    glBindTexture(GL_TEXTURE_2D, depthTex);
+    glUniform1i(s_depthTex, 0);
+    glUniform2f(s_texelSize, 1.0f / (float)w, 1.0f / (float)h);
+    glUniform1f(s_near, camNear);
+    glUniform1f(s_far, camFar);
+    glUniform1f(s_tanHalfFovY, camTanHalfFovY);
+    glUniform1f(s_aspect, camAspect);
+    glUniform1f(s_radius, settings.ssaoRadius);
+    glUniform1f(s_intensity, settings.ssaoIntensity);
+    DrawFullscreenTriangle();
+
+    // --- Blur pass: raw AO -> blurred AO ---
+    glBindFramebuffer(GL_FRAMEBUFFER, mAoBlurFBO);
+    glViewport(0, 0, w, h);
+    glUseProgram(mAoBlurProgram);
+    glBindTexture(GL_TEXTURE_2D, mAoTex);
+    glUniform1i(b_aoTex, 0);
+    glUniform2f(b_texelSize, 1.0f / (float)w, 1.0f / (float)h);
+    DrawFullscreenTriangle();
+
+    return mAoBlurTex;
 }
 
 //======================================================================================================================
@@ -228,8 +330,9 @@ void PostProcess::EnsureLdrResources(int w, int h)
 }
 
 //======================================================================================================================
-void PostProcess::Resolve(GLuint hdrColorTex, int hdrW, int hdrH,
+void PostProcess::Resolve(GLuint hdrColorTex, GLuint depthTex, int hdrW, int hdrH,
                           int rectX, int rectY, int rectW, int rectH,
+                          float camNear, float camFar, float camTanHalfFovY, float camAspect,
                           const PostSettings& settings)
 {
     if (!mInitialised)
@@ -244,6 +347,11 @@ void PostProcess::Resolve(GLuint hdrColorTex, int hdrW, int hdrH,
     GLuint bloomTex = 0;
     if (wantBloom)
         bloomTex = RunBloom(hdrColorTex, hdrW, hdrH, settings);
+
+    const bool wantAO = settings.ssaoEnabled && depthTex != 0;
+    GLuint aoTex = 0;
+    if (wantAO)
+        aoTex = RunSSAO(depthTex, hdrW, hdrH, camNear, camFar, camTanHalfFovY, camAspect, settings);
 
     // Sub-rect of the HDR texture that maps to this viewport rect.
     float uvOffX = (float)rectX / (float)hdrW;
@@ -278,6 +386,10 @@ void PostProcess::Resolve(GLuint hdrColorTex, int hdrW, int hdrH,
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, wantBloom ? bloomTex : hdrColorTex);
     glUniform1i(u_bloomTexture, 1);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, (wantAO && aoTex) ? aoTex : hdrColorTex);
+    glUniform1i(u_aoTexture, 2);
+    if (u_useAO >= 0) glUniform1f(u_useAO, (wantAO && aoTex) ? 1.0f : 0.0f);
     glActiveTexture(GL_TEXTURE0);
 
     if (wantFxaa)

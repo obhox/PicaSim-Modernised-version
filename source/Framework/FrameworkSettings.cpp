@@ -13,7 +13,7 @@ extern Window* gWindow;
 FrameworkSettings::FrameworkSettings()
     :
     mPhysicsSubsteps(8),
-    mCrashDamage(false),
+    mCrashDamage(true),
     mNearClipPlaneDistance(0.5f),
     mFarClipPlaneDistance(50000.0f),
     mUseMultiLights(true),
@@ -23,10 +23,12 @@ FrameworkSettings::FrameworkSettings()
     mExposure(1.0f),
     mFXAAEnabled(false),
     mPBRTonemap(false),
+    mSSAO(false),
     mUsePBR(true),
     mSHAmbientScale(1.0f),
     mShadowMode(1),        // 1 = Blob (legacy default). 2 = CSM (opt-in).
     mCsmBias(0.0015f),
+    mAnisotropy(1),        // 1 = off; raised by the graphics-quality tier.
     mEnhancedWater(false)  // opt-in; default OFF keeps existing water unchanged.
 {
     // Get platform type

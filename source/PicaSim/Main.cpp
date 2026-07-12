@@ -4,6 +4,7 @@
 #include "Menus/Menu.h"
 #include "Menus/StartMenu.h"
 #include "Menus/SettingsMenu.h"
+#include "Menus/HelpMenu.h"
 #include "Menus/FileMenu.h"
 #include "Menus/LoadingScreen.h"
 #include "Menus/WhatsNewMenu.h"
@@ -162,6 +163,9 @@ static bool        gCaptureFly = false;
 static bool        gCrashTest = false; // --crashtest: enable damage + dive into terrain
 static std::string gCaptureAeroplane;
 static std::string gCaptureEnvironment;
+// --menu <settings|help|file>: dev capture hook - boot straight into a menu screen
+// (paired with --screenshot-after) so the UI screens can be golden-captured.
+static std::string gCaptureMenu;
 
 static bool SetupCaptureScene(GameSettings& gameSettings)
 {
@@ -252,6 +256,21 @@ int main(int argc, char* argv[])
             else if (strcmp(argv[i], "--telemetry") == 0)
             {
                 PicaSim::SetForceTelemetry(true);
+            }
+            // --menu <settings|help|file>: boot straight into a menu for capture.
+            else if (strcmp(argv[i], "--menu") == 0 && i + 1 < argc)
+            {
+                gCaptureMenu = argv[++i];
+            }
+            // --paused: force the paused state (shows the full HUD button bar).
+            else if (strcmp(argv[i], "--paused") == 0)
+            {
+                PicaSim::SetBootPaused(true);
+            }
+            // --fpv: start in the onboard/FPV camera view (shows the FPV OSD).
+            else if (strcmp(argv[i], "--fpv") == 0)
+            {
+                PicaSim::SetBootFpv(true);
             }
         }
         if (screenshotFrame > 0)
@@ -462,6 +481,22 @@ int main(int argc, char* argv[])
                 {
                     TRACE_FILE_IF(1) TRACE("Doing default Free Fly");
                     startMenuResult = STARTMENU_FLY;
+                }
+                else if (!gCaptureMenu.empty())
+                {
+                    // Dev capture hook: boot straight into a menu screen, then quit.
+                    if (!gameSettings.mStatistics.mLoadedOptions)
+                        InitialiseOptions(gameSettings);
+                    if (gCaptureMenu == "settings")
+                    {
+                        SettingsChangeActions actions;
+                        DisplaySettingsMenu(gameSettings, actions);
+                    }
+                    else if (gCaptureMenu == "help")
+                    {
+                        DisplayHelpMenu(gameSettings, false);
+                    }
+                    startMenuResult = STARTMENU_QUIT;
                 }
                 else
                 {

@@ -47,9 +47,10 @@ static int ApplyCsmToModelShader(const ModelShader* ms, bool forceColour)
 //   </Materials>
 //
 // Absent file / missing entry => the AC3D-derived defaults are used. Matching is
-// by AC3D material name. normalMap is parsed and stored for later use (the shader
-// TBN path is not yet wired - no shipped aircraft currently reference one, so the
-// vertex format is unchanged for all existing models).
+// by AC3D material name. When normalMap is set, the component loads it as a
+// tangent-space normal map and the textured-model shader perturbs the normal via
+// the mesh tangents (see texturedmodel.vert/frag + the a_tangent draw path).
+// Components without a normalMap set u_useNormalMap=0 and render byte-identically.
 
 struct PBRMaterialOverride
 {
@@ -310,8 +311,71 @@ Texture* RenderModel::getTextureID(const std::string& textureName, const std::st
 }
 
 //======================================================================================================================
+Texture* RenderModel::getTextureFromSource(const GltfImageSource& src, bool rgb565, float colourOffset)
+{
+    if (src.empty())
+        return 0;
+
+    Textures::iterator it = mTextures.find(src.mName);
+    if (it != mTextures.end())
+        return it->second;
+
+    Texture* texture = new Texture;
+    if (!src.mPath.empty())
+        LoadTextureFromFile(*texture, src.mPath.c_str(), colourOffset);
+    else
+        LoadTextureFromMemory(*texture, &src.mBytes[0], (int) src.mBytes.size(), colourOffset, src.mName.c_str());
+
+    texture->SetClamping(false);
+    texture->SetMipMapping(true);   // Texture::Upload generates mips + anisotropy
+    texture->SetModifiable(false);
+    if (rgb565)
+        texture->SetFormatHW(CIwImage::RGB_565);
+    texture->Upload();
+
+    if (texture->GetFlags() & Texture::UPLOADED_F)
+    {
+        glBindTexture(GL_TEXTURE_2D, texture->mHWID);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    }
+    else
+    {
+        TRACE_FILE_IF(1) TRACE("Failed to upload glTF texture %s", src.mName.c_str());
+        delete texture;
+        return 0;
+    }
+
+    mTextures[src.mName] = texture;
+    return texture;
+}
+
+//======================================================================================================================
+// Per-triangle tangent from vertex positions + UVs (standard Lengyel formulation).
+// Returns a unit tangent in the same space as the positions; the shader re-
+// orthogonalises it against the interpolated normal, so a flat per-triangle
+// tangent is sufficient. Falls back to an arbitrary axis for degenerate UVs.
+static Vector3 ComputeTriangleTangent(const Vector3& p0, const Vector3& p1, const Vector3& p2,
+                                      const GLfloat uv0[2], const GLfloat uv1[2], const GLfloat uv2[2])
+{
+    Vector3 e1 = p1 - p0;
+    Vector3 e2 = p2 - p0;
+    float du1 = uv1[0] - uv0[0], dv1 = uv1[1] - uv0[1];
+    float du2 = uv2[0] - uv0[0], dv2 = uv2[1] - uv0[1];
+    float det = du1 * dv2 - du2 * dv1;
+    if (det > -1e-12f && det < 1e-12f)
+        return Vector3(1.0f, 0.0f, 0.0f);
+    Vector3 t = (e1 * dv2 - e2 * dv1) * (1.0f / det);
+    if (t.GetLengthSquared() < 1e-16f)
+        return Vector3(1.0f, 0.0f, 0.0f);
+    return t.GetNormalised();
+}
+
+//======================================================================================================================
 void RenderModel::Init(
-    const ACModel& model, const std::string& modelFile, const Vector3& offset, float colourOffset, 
+    const ACModel& model, const std::string& modelFile, const Vector3& offset, float colourOffset,
     const Vector3& modelScale, bool cullBackFaces, bool rgb565, const NamedComponents* namedComponents)
 {
     TRACE_METHOD_ONLY(1);
@@ -433,6 +497,10 @@ void RenderModel::Init(
                     {
                         if (ov->second.hasRoughness) rough = ov->second.roughness;
                         if (ov->second.hasMetallic)  metal = ov->second.metallic;
+                        // Optional normal map. Loaded with no colour offset / no
+                        // RGB565 so the tangent-space vectors are preserved exactly.
+                        if (component->mTexture && !ov->second.normalMap.empty() && component->mNormalTexture == 0)
+                            component->mNormalTexture = getTextureID(ov->second.normalMap, modelFile, false, 0.0f);
                     }
                     component->mRoughness = rough;
                     component->mMetallic  = metal;
@@ -443,25 +511,35 @@ void RenderModel::Init(
                 {
                     for (size_t iTriangle = 0 ; iTriangle != numTriangles ; ++iTriangle)
                     {
+                        // Build the triangle's 3 vertices first, then derive a shared
+                        // tangent from their positions + UVs (needs all three).
+                        TexturedVertex tri[3];
                         for (size_t iVertex = 0 ; iVertex != 3 ; ++iVertex)
                         {
                             size_t surfaceVertexIndex = (iVertex == 0) ? iVertex : iVertex + iTriangle;
                             size_t iV = surface.vertref[surfaceVertexIndex];
 
-                            TexturedVertex texturedVertex;
+                            TexturedVertex& texturedVertex = tri[iVertex];
 
                             texturedVertex.mPoint = object.vertices[iV];
                             texturedVertex.mNormal = surface.vertexNormals[surfaceVertexIndex];
 
-                            const ACMaterial& mat = model.mMaterials[surface.mat];
                             texturedVertex.mTexCoord[0] = surface.uvs[surfaceVertexIndex].u;
                             texturedVertex.mTexCoord[1] = 1.0f - surface.uvs[surfaceVertexIndex].v;
+                            texturedVertex.mTangent = Vector3(0.0f, 0.0f, 0.0f);
 
                             texturedVertex.mPoint += Vector3(object.loc.x, object.loc.y, object.loc.z);
                             texturedVertex.mPoint = ComponentMultiply(texturedVertex.mPoint, modelScale) + offset;
-
-                            component->mTexturedVertices.push_back(texturedVertex);
                         }
+
+                        Vector3 tangent = ComputeTriangleTangent(
+                            tri[0].mPoint, tri[1].mPoint, tri[2].mPoint,
+                            tri[0].mTexCoord, tri[1].mTexCoord, tri[2].mTexCoord);
+                        tri[0].mTangent = tri[1].mTangent = tri[2].mTangent = tangent;
+
+                        component->mTexturedVertices.push_back(tri[0]);
+                        component->mTexturedVertices.push_back(tri[1]);
+                        component->mTexturedVertices.push_back(tri[2]);
                     }
                 }
                 else
@@ -526,12 +604,15 @@ void RenderModel::Init(const GltfModelData& data, bool cullBackFaces, bool rgb56
         mComponents.push_back(Component(src.mName));
         Component* component = &mComponents.back();
 
-        if (!src.mTexturePath.empty())
+        if (!src.mBaseColor.empty())
         {
-            // Pass the already-resolved path as the texture name with an empty
-            // model file so getTextureID uses it verbatim.
-            component->mTexture = getTextureID(src.mTexturePath, "", rgb565, colourOffset);
-            component->mTextureName = src.mTexturePath;
+            component->mTexture = getTextureFromSource(src.mBaseColor, rgb565, colourOffset);
+            component->mTextureName = src.mBaseColor.mName;
+        }
+        if (!src.mNormal.empty())
+        {
+            // Normal maps encode vectors: no HSV colour offset and no RGB565.
+            component->mNormalTexture = getTextureFromSource(src.mNormal, false, 0.0f);
         }
 
         component->mTexturedVertices = src.mTexturedVertices;
@@ -782,7 +863,7 @@ bool RenderModel::PartRenderPre(const Vector4* colour, bool forceColour, ShaderP
         (TexturedModelShader*) ShaderManager::GetInstance().GetShader(SHADER_TEXTUREDMODEL);
     const ModelShader* modelShader = (ModelShader*) ShaderManager::GetInstance().GetShader(SHADER_MODEL);
 
-    int positionLoc=-1, normalLoc=-1, texCoordLoc=-1;
+    int positionLoc=-1, normalLoc=-1, texCoordLoc=-1, tangentLoc=-1;
     const LightShaderInfo (* lightShaderInfo)[5] = 0;
 
     if (colour)
@@ -831,6 +912,7 @@ bool RenderModel::PartRenderPre(const Vector4* colour, bool forceColour, ShaderP
             positionLoc = texturedModelShader->a_position;
             normalLoc = texturedModelShader->a_normal;
             texCoordLoc = texturedModelShader->a_texCoord;
+            tangentLoc = texturedModelShader->a_tangent;
 
             lightShaderInfo = &texturedModelShader->lightShaderInfo;
 
@@ -838,6 +920,18 @@ bool RenderModel::PartRenderPre(const Vector4* colour, bool forceColour, ShaderP
             glUniform1f(texturedModelShader->u_texBias, -0.5f);
             glUniform1f(texturedModelShader->u_specularAmount, specularAmount2);
             glUniform1f(texturedModelShader->u_specularExponent, specularExponent2);
+
+            // Normal map (texture unit 1). Enabled only for components that have one;
+            // u_useNormalMap=0 otherwise so the shader path is byte-identical.
+            bool useNormalMap = (component.mNormalTexture != 0);
+            if (texturedModelShader->u_useNormalMap >= 0)
+                glUniform1f(texturedModelShader->u_useNormalMap, useNormalMap ? 1.0f : 0.0f);
+            if (useNormalMap)
+            {
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, component.mNormalTexture->mHWID);
+                glActiveTexture(GL_TEXTURE0);
+            }
         }
         else
         {
@@ -900,6 +994,14 @@ bool RenderModel::PartRenderPre(const Vector4* colour, bool forceColour, ShaderP
 
             glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, elementSize, (GLvoid*) (start + sizeof(Vector3) + sizeof(Vector3)));
             glEnableVertexAttribArray(texCoordLoc);
+
+            // Tangent: appended after mTexCoord[2] in TexturedVertex (see RenderModel.h).
+            if (tangentLoc >= 0)
+            {
+                glVertexAttribPointer(tangentLoc, 3, GL_FLOAT, GL_FALSE, elementSize,
+                    (GLvoid*) (start + sizeof(Vector3) + sizeof(Vector3) + sizeof(GLfloat) * 2));
+                glEnableVertexAttribArray(tangentLoc);
+            }
         }
         else
         {
@@ -1028,6 +1130,8 @@ void RenderModel::PartRenderPost(const Vector4* colour, bool forceColour, int co
         glDisableVertexAttribArray(texturedModelShader->a_normal);
         glDisableVertexAttribArray(texturedModelShader->a_texCoord);
         glDisableVertexAttribArray(texturedModelShader->a_colour);
+        if (texturedModelShader->a_tangent >= 0)
+            glDisableVertexAttribArray(texturedModelShader->a_tangent);
 
         // Disable non-textured model shader attributes (may overlap, but safe)
         glDisableVertexAttribArray(modelShader->a_position);

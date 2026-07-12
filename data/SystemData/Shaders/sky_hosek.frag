@@ -111,19 +111,38 @@ void main()
         rgb += sunTint * (sunDisc * 45.0 + glow) * horizon * max(u_skyBrightness, 0.05);
     }
 
-    // Cheap cirrus: scrolling fbm in the upper hemisphere, fading out near the
-    // horizon and vanishing when cloudCover is 0.
-    if (u_cloudCover > 0.001 && dir.z > 0.02)
+    // Cumulus clouds: domain-warped fbm on a virtual cloud plane, cheaply shaded
+    // by sampling the density a step toward the sun (lit sun-facing edges, cool
+    // self-shadowed bases). Fades out near the horizon; vanishes at cloudCover 0.
+    if (u_cloudCover > 0.001 && dir.z > 0.015)
     {
-        // Project the ray onto a virtual cloud plane above the viewer.
-        vec2 uv = dir.xy / max(dir.z, 0.05);
-        uv = uv * 0.5 + vec2(0.02, 0.015) * u_time;
-        float n = fbm(uv * 1.5);
-        float coverage = smoothstep(1.0 - u_cloudCover, 1.0, n);
-        float fade = smoothstep(0.02, 0.35, dir.z);
-        // Cirrus catches the sun colour a little; mostly bright white.
-        vec3 cloudCol = vec3(0.9, 0.92, 0.95) * (0.6 + 0.6 * u_skyBrightness);
-        rgb = mix(rgb, cloudCol, coverage * fade * 0.85);
+        // Ray -> plane above the viewer.
+        vec2 base = dir.xy / max(dir.z, 0.05);
+        vec2 uv = base * 0.9 + vec2(0.010, 0.008) * u_time;
+
+        // Domain warp gives billowy, non-streaky shapes.
+        vec2 warp = vec2(fbm(uv + vec2(1.7, 9.2)), fbm(uv + vec2(8.3, 2.8)));
+        float dens = fbm(uv * 1.3 + warp * 0.6);
+
+        // Coverage: more cloudCover -> lower threshold -> puffier sky.
+        float thr = mix(0.60, 0.28, clamp(u_cloudCover, 0.0, 1.0));
+        float cloud = smoothstep(thr, thr + 0.24, dens);
+
+        // Cheap directional lighting: density a step toward the (plane-projected)
+        // sun. If the sun side is thinner, this bit is a lit edge.
+        vec2 sunUV = u_sunDir.xy / max(u_sunDir.z, 0.15);
+        vec2 ldir = normalize(sunUV - base + vec2(1e-3, 1e-3));
+        float densL = fbm((uv + ldir * 0.16) * 1.3 + warp * 0.6);
+        float light = clamp((dens - densL) * 2.6 + 0.52, 0.0, 1.0);
+
+        // Sunlit warm-white top vs cool grey base.
+        vec3 lit    = mix(vec3(0.86, 0.89, 0.96), vec3(1.03, 1.00, 0.95),
+                          clamp(u_sunDir.z * 2.0, 0.0, 1.0));
+        vec3 shadow = vec3(0.44, 0.49, 0.60);
+        vec3 cloudCol = mix(shadow, lit, light) * (0.55 + 0.55 * u_skyBrightness);
+
+        float fade = smoothstep(0.015, 0.20, dir.z);
+        rgb = mix(rgb, cloudCol, clamp(cloud * fade, 0.0, 1.0) * 0.94);
     }
 
     FRAGCOLOR = vec4(rgb, 1.0);

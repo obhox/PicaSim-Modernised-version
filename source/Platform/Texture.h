@@ -56,6 +56,14 @@ public:
         bool LoadFromFile(const char* filename);
 
         /**
+          * Load image from an in-memory encoded buffer (PNG/JPG/etc bytes) using
+          * stb_image. Used for glTF textures embedded in a GLB buffer view or a
+          * base64 data URI.
+          * @return true on success
+          */
+        bool LoadFromMemory(const unsigned char* data, int size);
+
+        /**
           * Set image dimensions and format (for manual buffer management)
           */
         void SetFormat(TextureFormat::Type format) { mFormat = format; }
@@ -181,6 +189,22 @@ public:
         void GenerateMipmaps();
 
         /**
+          * Set anisotropic filtering on this texture. A negative level (the default)
+          * uses the global level set via SetGlobalAnisotropy(); otherwise the given
+          * level is used. The value is clamped to the driver maximum, and the call
+          * is a no-op if the hardware does not support anisotropic filtering.
+          */
+        void SetAnisotropy(float level = -1.0f);
+
+        /**
+          * Global default anisotropy level, driven by the graphics-quality tier
+          * (1 = off/isotropic, up to the driver maximum). Textures that generate
+          * mipmaps pick this up automatically on upload.
+          */
+        static void SetGlobalAnisotropy(float level);
+        static float GetGlobalAnisotropy();
+
+        /**
           * Release GPU resources
           */
         void Release();
@@ -239,6 +263,12 @@ private:
         unsigned char* mCachedData;
         int mCachedDataSize;
         int mCachedChannels;
+
+        // Resolve 'want' against the driver max (queried lazily). Returns a value in
+        // [1, driverMax], or <= 1 when anisotropic filtering is unavailable.
+        static float ResolveAnisotropy(float want);
+        static float sGlobalAnisotropy;  // desired default level (from quality tier)
+        static float sMaxAnisotropy;     // driver cap; < 0 = not yet queried
 };
 
 // Compatibility typedef for old code that uses CIwTexture

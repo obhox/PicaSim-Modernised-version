@@ -24,6 +24,7 @@ namespace UIHelpers
 
     // Get the loaded font (or nullptr if not loaded)
     ImFont* GetFont();
+    ImFont* GetBoldFont();
 
     // Draw a full-screen background image with aspect-ratio-correct cropping
     // Returns the draw list used (for additional drawing)

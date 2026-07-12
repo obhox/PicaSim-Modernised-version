@@ -1,5 +1,6 @@
 <?xml version="1.0" ?>
 <Options mVersion="3"
+ mGraphicsQuality="1"
  mFrameworkSettings.mPhysicsSubsteps="5"
  mFrameworkSettings.mUseMultiLights="1"
  mMaxNearClipDistance="1"

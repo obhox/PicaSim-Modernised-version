@@ -56,6 +56,27 @@ static Vector3 TransformNormal(const float m[16], float x, float y, float z)
 }
 
 //======================================================================================================================
+// Per-triangle tangent from positions + UVs (Lengyel), matching the AC3D path in
+// RenderModel.cpp. Used only when a glTF mesh has a normal map but no TANGENT
+// attribute. The shader re-orthogonalises against the interpolated normal, so a
+// flat per-triangle tangent is sufficient.
+static Vector3 ComputeGltfTangent(const Vector3& p0, const Vector3& p1, const Vector3& p2,
+                                  const float uv0[2], const float uv1[2], const float uv2[2])
+{
+    Vector3 e1 = p1 - p0;
+    Vector3 e2 = p2 - p0;
+    float du1 = uv1[0] - uv0[0], dv1 = uv1[1] - uv0[1];
+    float du2 = uv2[0] - uv0[0], dv2 = uv2[1] - uv0[1];
+    float det = du1 * dv2 - du2 * dv1;
+    if (det > -1e-12f && det < 1e-12f)
+        return Vector3(1.0f, 0.0f, 0.0f);
+    Vector3 t = (e1 * dv2 - e2 * dv1) * (1.0f / det);
+    if (t.GetLengthSquared() < 1e-16f)
+        return Vector3(1.0f, 0.0f, 0.0f);
+    return t.GetNormalised();
+}
+
+//======================================================================================================================
 static const cgltf_accessor* FindAttribute(const cgltf_primitive* prim, cgltf_attribute_type type, int setIndex)
 {
     for (cgltf_size a = 0; a < prim->attributes_count; ++a)
@@ -68,23 +89,88 @@ static const cgltf_accessor* FindAttribute(const cgltf_primitive* prim, cgltf_at
 }
 
 //======================================================================================================================
-// Resolve a glTF image to a filesystem path relative to the .gltf's directory.
-// Returns "" for embedded / GLB-binary / data-URI images (which are NOT loaded -
-// external-URI images only, as documented). The caller then falls back to the
-// vertex-colour (untextured) path.
-static std::string ResolveImagePath(const cgltf_image* image, const std::string& gltfDir)
+// Minimal base64 decode for image data URIs. Appends decoded bytes to 'out'.
+static void Base64Decode(const char* b64, size_t len, std::vector<unsigned char>& out)
 {
-    if (!image || !image->uri)
-        return std::string();                 // embedded (buffer_view) - stubbed
-    if (std::strncmp(image->uri, "data:", 5) == 0)
-        return std::string();                 // base64 data URI - stubbed
+    // Build the reverse lookup once (loading is single-threaded).
+    static bool init = false;
+    static int8_t rev[256];
+    if (!init)
+    {
+        for (int i = 0; i < 256; ++i) rev[i] = -1;
+        const char* alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        for (int i = 0; i < 64; ++i) rev[(unsigned char) alpha[i]] = (int8_t) i;
+        init = true;
+    }
 
-    // cgltf leaves the uri percent-encoded; decode a mutable copy in place.
+    int val = 0, bits = -8;
+    for (size_t i = 0; i < len; ++i)
+    {
+        int8_t c = rev[(unsigned char) b64[i]];
+        if (c < 0) continue;                 // skip '=', whitespace, newlines
+        val = (val << 6) | c;
+        bits += 6;
+        if (bits >= 0)
+        {
+            out.push_back((unsigned char) ((val >> bits) & 0xFF));
+            bits -= 8;
+        }
+    }
+}
+
+//======================================================================================================================
+// Resolve a glTF image to a loadable source: an external file path, or in-memory
+// encoded bytes for GLB buffer-view images and base64 data-URI images. Leaves
+// 'out' empty() only if the image is missing/unreadable.
+static void ExtractImage(const cgltf_data* data, const cgltf_image* image,
+                         const std::string& gltfDir, const std::string& modelFile,
+                         RenderModel::GltfImageSource& out)
+{
+    if (!image)
+        return;
+
+    // Stable cache key: image name if present, else model file + image index.
+    size_t imgIndex = (data && data->images) ? (size_t) (image - data->images) : 0;
+    std::string key = image->name ? std::string(image->name)
+                                   : (modelFile + "#img" + std::to_string(imgIndex));
+
+    // 1) GLB / buffer-view embedded: encoded bytes live in a loaded buffer.
+    if (image->buffer_view)
+    {
+        const uint8_t* p = cgltf_buffer_view_data(image->buffer_view);
+        cgltf_size sz = image->buffer_view->size;
+        if (p && sz)
+        {
+            out.mBytes.assign(p, p + sz);
+            out.mName = key;
+        }
+        return;
+    }
+
+    if (!image->uri)
+        return;
+
+    // 2) base64 data URI: data:[<mime>];base64,<payload>
+    if (std::strncmp(image->uri, "data:", 5) == 0)
+    {
+        const char* comma = std::strchr(image->uri, ',');
+        if (comma)
+        {
+            const char* b64 = comma + 1;
+            Base64Decode(b64, std::strlen(b64), out.mBytes);
+            if (!out.mBytes.empty())
+                out.mName = key;
+        }
+        return;
+    }
+
+    // 3) external file: percent-decode the URI relative to the model directory.
     std::string uri = image->uri;
     std::vector<char> tmp(uri.begin(), uri.end());
     tmp.push_back('\0');
     cgltf_decode_uri(&tmp[0]);
-    return gltfDir + std::string(&tmp[0]);
+    out.mPath = gltfDir + std::string(&tmp[0]);
+    out.mName = out.mPath;
 }
 
 //======================================================================================================================
@@ -149,33 +235,42 @@ bool LoadGltfModel(
             const cgltf_accessor* normAcc  = FindAttribute(prim, cgltf_attribute_type_normal,   0);
             const cgltf_accessor* uvAcc    = FindAttribute(prim, cgltf_attribute_type_texcoord, 0);
             const cgltf_accessor* colAcc   = FindAttribute(prim, cgltf_attribute_type_color,    0);
+            const cgltf_accessor* tanAcc   = FindAttribute(prim, cgltf_attribute_type_tangent,  0);
             if (!posAcc)
                 continue;
-
-            // --- Material -> PBR-lite params + base colour + base-colour texture ---
-            float baseColour[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-            float roughness = 0.6f;
-            float metallic  = 0.0f;
-            std::string texturePath;
-            if (prim->material && prim->material->has_pbr_metallic_roughness)
-            {
-                const cgltf_pbr_metallic_roughness& mr = prim->material->pbr_metallic_roughness;
-                baseColour[0] = mr.base_color_factor[0];
-                baseColour[1] = mr.base_color_factor[1];
-                baseColour[2] = mr.base_color_factor[2];
-                baseColour[3] = mr.base_color_factor[3];
-                roughness = mr.roughness_factor;
-                metallic  = mr.metallic_factor;
-                if (mr.base_color_texture.texture && mr.base_color_texture.texture->image)
-                    texturePath = ResolveImagePath(mr.base_color_texture.texture->image, gltfDir);
-            }
-
-            bool textured = !texturePath.empty();
 
             RenderModel::GltfComponentData component;
             component.mName = !nodeName.empty() ? nodeName
                                                 : (std::string("Gltf") + std::to_string(synthName++));
-            component.mTexturePath = texturePath;
+
+            // --- Material -> PBR-lite params + base colour + base-colour/normal maps ---
+            float baseColour[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+            float roughness = 0.6f;
+            float metallic  = 0.0f;
+            if (prim->material)
+            {
+                if (prim->material->has_pbr_metallic_roughness)
+                {
+                    const cgltf_pbr_metallic_roughness& mr = prim->material->pbr_metallic_roughness;
+                    baseColour[0] = mr.base_color_factor[0];
+                    baseColour[1] = mr.base_color_factor[1];
+                    baseColour[2] = mr.base_color_factor[2];
+                    baseColour[3] = mr.base_color_factor[3];
+                    roughness = mr.roughness_factor;
+                    metallic  = mr.metallic_factor;
+                    if (mr.base_color_texture.texture && mr.base_color_texture.texture->image)
+                        ExtractImage(data, mr.base_color_texture.texture->image, gltfDir, filename, component.mBaseColor);
+                }
+                if (prim->material->normal_texture.texture && prim->material->normal_texture.texture->image)
+                    ExtractImage(data, prim->material->normal_texture.texture->image, gltfDir, filename, component.mNormal);
+            }
+
+            bool textured = !component.mBaseColor.empty();
+            bool hasNormalMap = !component.mNormal.empty();
+            // Tangents are only meaningful with a normal map. Compute per-triangle
+            // when the mesh lacks a TANGENT attribute.
+            bool computeTangents = hasNormalMap && !tanAcc;
+
             component.mRoughness = ClampToRange(roughness, 0.04f, 1.0f);
             component.mMetallic  = ClampToRange(metallic, 0.0f, 1.0f);
 
@@ -183,6 +278,7 @@ bool LoadGltfModel(
             cgltf_size indexCount = prim->indices ? prim->indices->count : posAcc->count;
             for (cgltf_size i = 0; i + 3 <= indexCount; i += 3)
             {
+                RenderModel::TexturedVertex tri[3];   // buffered so a per-triangle tangent can be derived
                 for (int c = 0; c < 3; ++c)
                 {
                     cgltf_size vi = prim->indices ? cgltf_accessor_read_index(prim->indices, i + c)
@@ -226,7 +322,7 @@ bool LoadGltfModel(
 
                     if (textured)
                     {
-                        RenderModel::TexturedVertex tv;
+                        RenderModel::TexturedVertex& tv = tri[c];
                         tv.mPoint = point;
                         tv.mNormal = normal;
                         float uvw[2] = { 0, 0 };
@@ -237,8 +333,32 @@ bool LoadGltfModel(
                         // (unflipped stb) Texture loader.
                         tv.mTexCoord[0] = uvw[0];
                         tv.mTexCoord[1] = 1.0f - uvw[1];
-                        component.mTexturedVertices.push_back(tv);
+                        // Tangent: use the mesh's TANGENT attribute if present
+                        // (ignore the .w handedness, matching the AC3D path),
+                        // otherwise leave zero and derive per-triangle below.
+                        Vector3 tangent(0.0f, 0.0f, 0.0f);
+                        if (tanAcc)
+                        {
+                            float tg[4] = { 1, 0, 0, 1 };
+                            cgltf_accessor_read_float(tanAcc, vi, tg, 4);
+                            tangent = TransformNormal(world, tg[0], tg[1], tg[2]);
+                        }
+                        tv.mTangent = tangent;
                     }
+                }
+
+                if (textured)
+                {
+                    if (computeTangents)
+                    {
+                        Vector3 t = ComputeGltfTangent(
+                            tri[0].mPoint, tri[1].mPoint, tri[2].mPoint,
+                            tri[0].mTexCoord, tri[1].mTexCoord, tri[2].mTexCoord);
+                        tri[0].mTangent = tri[1].mTangent = tri[2].mTangent = t;
+                    }
+                    component.mTexturedVertices.push_back(tri[0]);
+                    component.mTexturedVertices.push_back(tri[1]);
+                    component.mTexturedVertices.push_back(tri[2]);
                 }
             }
 

@@ -5,132 +5,163 @@
 
 //=================================================================================================
 // PicaStyle - Centralized UI color and style definitions
+//
+// "Field index" design language: a flat periwinkle-sky ground, deep-navy ink,
+// warm paper cards with a hairline navy border + hard offset shadow, and a single
+// warm-orange flare accent used sparingly. All-monospace typography (see
+// UIHelpers font loading). Everything below derives from the Palette namespace.
 //=================================================================================================
 namespace PicaStyle {
 
-    // === COMMON COLORS (truly shared across all UI) ===
-    namespace Common {
-        // Accent colors (professional blue #4A90B8)
-        const ImVec4 Accent = ImVec4(0.29f, 0.56f, 0.72f, 1.0f);
-        const ImVec4 AccentHovered = ImVec4(0.25f, 0.52f, 0.68f, 1.0f);
-        const ImVec4 AccentActive = ImVec4(0.21f, 0.49f, 0.64f, 1.0f);
+    // === PALETTE (single source of truth) ===
+    namespace Palette {
+        // sky #A9C4E8 | ink #15233F | paper #F6F2E9 | flare #EF4B22
+        const ImVec4 Sky        = ImVec4(0.663f, 0.769f, 0.910f, 1.0f);
+        const ImVec4 SkyDeep    = ImVec4(0.608f, 0.722f, 0.878f, 1.0f);
+        const ImVec4 Ink        = ImVec4(0.082f, 0.137f, 0.247f, 1.0f);
+        const ImVec4 Ink2       = ImVec4(0.329f, 0.392f, 0.541f, 1.0f);
+        const ImVec4 Ink3       = ImVec4(0.514f, 0.565f, 0.682f, 1.0f);
+        const ImVec4 Paper      = ImVec4(0.965f, 0.949f, 0.914f, 1.0f);
+        const ImVec4 Paper2     = ImVec4(0.984f, 0.976f, 0.953f, 1.0f);
+        const ImVec4 Flare      = ImVec4(0.937f, 0.294f, 0.133f, 1.0f);
+        const ImVec4 FlareDeep  = ImVec4(0.835f, 0.243f, 0.094f, 1.0f);
+        const ImVec4 Sun        = ImVec4(0.984f, 0.761f, 0.231f, 1.0f);
+        const ImVec4 Leaf       = ImVec4(0.435f, 0.639f, 0.420f, 1.0f);
+        const ImVec4 White      = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 
-        // As ImU32 for custom drawing
-        const ImU32 AccentU32 = IM_COL32(74, 144, 184, 255);
-        const ImU32 AccentHoveredU32 = IM_COL32(64, 134, 174, 255);
-        const ImU32 AccentActiveU32 = IM_COL32(54, 124, 164, 255);
+        // ImU32 forms for custom ImDrawList drawing
+        const ImU32 SkyU32       = IM_COL32(169, 196, 232, 255);
+        const ImU32 SkyDeepU32   = IM_COL32(155, 184, 224, 255);
+        const ImU32 InkU32       = IM_COL32( 21,  35,  63, 255);
+        const ImU32 Ink2U32      = IM_COL32( 84, 100, 138, 255);
+        const ImU32 Ink3U32      = IM_COL32(131, 144, 174, 255);
+        const ImU32 PaperU32     = IM_COL32(246, 242, 233, 255);
+        const ImU32 Paper2U32    = IM_COL32(251, 249, 243, 255);
+        const ImU32 FlareU32     = IM_COL32(239,  75,  34, 255);
+        const ImU32 FlareDeepU32 = IM_COL32(213,  62,  24, 255);
+        const ImU32 SunU32       = IM_COL32(251, 194,  59, 255);
+        const ImU32 LeafU32      = IM_COL32(111, 163, 107, 255);
+        const ImU32 WhiteU32     = IM_COL32(255, 255, 255, 255);
+        const ImU32 LineU32      = IM_COL32( 21,  35,  63,  51);  // ink @ .20 hairline
+        const ImU32 LineStrU32   = IM_COL32( 21,  35,  63, 107);  // ink @ .42
+        const ImU32 ShadowU32    = IM_COL32( 21,  35,  63,  46);  // hard offset shadow
+    }
+
+    // === COMMON COLORS (mapped onto the palette; names kept for back-compat) ===
+    namespace Common {
+        // "Accent" is now the warm flare
+        const ImVec4 Accent = Palette::Flare;
+        const ImVec4 AccentHovered = Palette::FlareDeep;
+        const ImVec4 AccentActive = Palette::FlareDeep;
+
+        const ImU32 AccentU32 = Palette::FlareU32;
+        const ImU32 AccentHoveredU32 = Palette::FlareDeepU32;
+        const ImU32 AccentActiveU32 = Palette::FlareDeepU32;
 
         // Text colors
-        const ImVec4 TextBlack = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        const ImVec4 TextWhite = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-        const ImVec4 TextDimmed = ImVec4(0.4f, 0.4f, 0.4f, 1.0f);
-        const ImVec4 TextSecondary = ImVec4(0.3f, 0.3f, 0.3f, 1.0f);
-        const ImU32 TextPrimaryU32 = IM_COL32(44, 62, 80, 255);       // #2C3E50
-        const ImU32 TextSecondaryU32 = IM_COL32(108, 122, 138, 255);  // #6C7A8A
+        const ImVec4 TextBlack = Palette::Ink;        // primary text is deep navy ink
+        const ImVec4 TextWhite = Palette::White;
+        const ImVec4 TextDimmed = Palette::Ink3;
+        const ImVec4 TextSecondary = Palette::Ink2;
+        const ImU32 TextPrimaryU32 = Palette::InkU32;
+        const ImU32 TextSecondaryU32 = Palette::Ink2U32;
 
         // Input fields
-        const ImVec4 FrameBgWhite = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+        const ImVec4 FrameBgWhite = Palette::Paper2;
 
         // Standard styling
-        const float CornerRadius = 4.0f;
+        const float CornerRadius = 8.0f;
     }
 
     // === MENU STYLES (FileMenu, HelpMenu, WhatsNewMenu) ===
     namespace Menu {
-        const ImVec4 WindowBg = ImVec4(0.70f, 0.75f, 0.82f, 1.0f);
-        const ImVec4 ChildBg = ImVec4(0.85f, 0.88f, 0.92f, 1.0f);
-        const ImVec4 Button = ImVec4(0.78f, 0.80f, 0.85f, 1.0f);
-        const ImVec4 ButtonHovered = ImVec4(0.82f, 0.85f, 0.92f, 1.0f);
-        const ImVec4 ButtonActive = ImVec4(0.68f, 0.71f, 0.78f, 1.0f);
-        const ImVec4 Tab = ImVec4(0.75f, 0.78f, 0.85f, 1.0f);
-        const ImVec4 TabHovered = ImVec4(0.85f, 0.88f, 0.95f, 1.0f);
-        const ImVec4 TabActive = ImVec4(0.90f, 0.92f, 0.98f, 1.0f);
+        const ImVec4 WindowBg = Palette::Sky;
+        const ImVec4 ChildBg = Palette::Paper;
+        const ImVec4 Button = Palette::Paper2;
+        const ImVec4 ButtonHovered = ImVec4(0.937f, 0.906f, 0.851f, 1.0f); // warm paper hover
+        const ImVec4 ButtonActive = ImVec4(0.898f, 0.859f, 0.792f, 1.0f);
+        const ImVec4 Tab = Palette::SkyDeep;
+        const ImVec4 TabHovered = Palette::Paper2;
+        const ImVec4 TabActive = Palette::Paper;
     }
 
     // === SETTINGS MENU STYLES ===
     namespace Settings {
-        const ImVec4 WindowBg = ImVec4(0.70f, 0.75f, 0.82f, 1.0f);  // Same as Menu
-        const ImVec4 BlockBg = ImVec4(0.91f, 0.91f, 0.93f, 1.0f);   // Settings blocks (lighter)
+        const ImVec4 WindowBg = Palette::Sky;
+        const ImVec4 BlockBg = Palette::Paper;
         // Button colors: use Menu::Button, Menu::ButtonHovered, Menu::ButtonActive
 
-        // Section headers
-        const ImVec4 SectionHeaderBg = ImVec4(0.35f, 0.42f, 0.48f, 1.0f);      // #5A6A7A
-        const ImVec4 UberSectionHeaderBg = ImVec4(0.24f, 0.42f, 0.54f, 1.0f);  // #3D6B8A teal
-        const float SectionHeaderRounding = 3.0f;
-        const float BlockRounding = 4.0f;
-        const ImVec2 BlockPadding = ImVec2(8.0f, 6.0f);
+        // Section headers: navy bar (primary), orange bar (uber)
+        const ImVec4 SectionHeaderBg = Palette::Ink;
+        const ImVec4 UberSectionHeaderBg = Palette::Flare;
+        const float SectionHeaderRounding = 6.0f;
+        const float BlockRounding = 8.0f;
+        const ImVec2 BlockPadding = ImVec2(12.0f, 10.0f);
 
         // Custom control colors
-        const ImU32 SliderTrackBg = IM_COL32(200, 203, 210, 255);
-        const ImU32 SliderTrackFill = IM_COL32(74, 144, 184, 255);  // Accent
-        const ImU32 SliderGrab = IM_COL32(74, 144, 184, 255);
-        const ImU32 SliderGrabHovered = IM_COL32(64, 134, 174, 255);
-        const ImU32 SliderGrabActive = IM_COL32(54, 124, 164, 255);
+        const ImU32 SliderTrackBg = Palette::LineU32;
+        const ImU32 SliderTrackFill = Palette::FlareU32;
+        const ImU32 SliderGrab = Palette::FlareU32;
+        const ImU32 SliderGrabHovered = Palette::FlareDeepU32;
+        const ImU32 SliderGrabActive = Palette::FlareDeepU32;
         const float SliderTrackHeight = 6.0f;
         const float SliderGrabRadius = 8.0f;
 
-        const ImU32 CheckboxBorder = IM_COL32(150, 155, 165, 255);
-        const ImU32 CheckboxFill = IM_COL32(74, 144, 184, 255);     // Accent
-        const ImU32 CheckboxCheck = IM_COL32(255, 255, 255, 255);
+        const ImU32 CheckboxBorder = Palette::InkU32;
+        const ImU32 CheckboxFill = Palette::FlareU32;
+        const ImU32 CheckboxCheck = Palette::WhiteU32;
         const float CheckboxSize = 18.0f;
 
-        const ImVec4 ComboPopupBg = ImVec4(0.95f, 0.95f, 0.97f, 1.0f);
+        const ImVec4 ComboPopupBg = Palette::Paper2;
     }
 
     // === DIALOG STYLES (modal overlays) ===
     namespace Dialog {
-        const ImVec4 WindowBg = ImVec4(0.90f, 0.92f, 0.95f, 0.94f);  // Lighter, semi-transparent
-        const ImVec4 ChildBg = ImVec4(0.85f, 0.88f, 0.92f, 0.90f);   // Semi-transparent
-        const ImVec4 Border = ImVec4(0.5f, 0.5f, 0.6f, 0.5f);
+        const ImVec4 WindowBg = ImVec4(0.965f, 0.949f, 0.914f, 0.98f); // paper, near-opaque
+        const ImVec4 ChildBg = Palette::Paper2;
+        const ImVec4 Border = Palette::Ink;
         // Uses Menu::Button colors for buttons
     }
 
-    // === START MENU STYLES (on panorama background) ===
+    // === START MENU STYLES ===
     namespace StartMenu {
-        const ImVec4 Button = ImVec4(0.95f, 0.95f, 0.95f, 0.9f);
-        const ImVec4 ButtonHovered = ImVec4(1.0f, 1.0f, 1.0f, 0.95f);
-        const ImVec4 ButtonActive = ImVec4(0.88f, 0.88f, 0.88f, 1.0f);
+        const ImVec4 Button = Palette::Paper2;
+        const ImVec4 ButtonHovered = Palette::Paper;
+        const ImVec4 ButtonActive = ImVec4(0.898f, 0.859f, 0.792f, 1.0f);
     }
 
     // === IMAGE BUTTON STYLES (transparent buttons over images) ===
     namespace ImageButton {
         const ImVec4 Transparent = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        // For menu contexts (on light content backgrounds)
-        const ImVec4 HoverDark = ImVec4(0.3f, 0.3f, 0.3f, 0.3f);
-        const ImVec4 ActiveDark = ImVec4(0.2f, 0.2f, 0.2f, 0.3f);
-        // For panorama/dark contexts
+        const ImVec4 HoverDark = ImVec4(0.082f, 0.137f, 0.247f, 0.14f);
+        const ImVec4 ActiveDark = ImVec4(0.082f, 0.137f, 0.247f, 0.24f);
         const ImVec4 HoverLight = ImVec4(1.0f, 1.0f, 1.0f, 0.2f);
         const ImVec4 ActiveLight = ImVec4(1.0f, 1.0f, 1.0f, 0.4f);
-        // Placeholder for missing thumbnails
-        const ImVec4 Placeholder = ImVec4(0.5f, 0.5f, 0.5f, 0.5f);
+        const ImVec4 Placeholder = Palette::SkyDeep;
     }
 
     // === LAYOUT CONSTANTS ===
     namespace Layout {
-        const float ControlWidthFraction = 0.45f;   // How much of row width the control takes
-        const float LabelRightPadding = 16.0f;      // Padding between label and value
-        const float LabelValueButtonWidth = 60.0f;  // Width of value column in LabelValueButton
-        const float RowExtraSpacing = 2.0f;         // Extra vertical spacing between rows
+        const float ControlWidthFraction = 0.45f;
+        const float LabelRightPadding = 16.0f;
+        const float LabelValueButtonWidth = 60.0f;
+        const float RowExtraSpacing = 3.0f;
     }
 
     // === HELPER FUNCTIONS ===
-    // Push/pop complete style sets for different UI contexts
-
-    // For FileMenu, HelpMenu, WhatsNewMenu (10 colors + 2 style vars)
     void PushMenuStyle();
     void PopMenuStyle();
-
-    // For PicaDialog (7 colors + 2 style vars)
     void PushDialogStyle();
     void PopDialogStyle();
-
-    // For SettingsMenu (10 colors + 2 style vars)
     void PushSettingsStyle();
     void PopSettingsStyle();
-
-    // For StartMenu buttons (4 colors + 2 style vars)
     void PushStartMenuButtonStyle(float scale);
     void PopStartMenuButtonStyle();
+
+    // Draw an editorial "card": hard offset shadow + paper fill + hairline navy
+    // border, into the given draw list. Pass hovered=true to lift/strengthen it.
+    void DrawCard(ImDrawList* dl, ImVec2 pmin, ImVec2 pmax, bool hovered = false,
+                  ImU32 fill = Palette::PaperU32, float rounding = 8.0f);
 
 } // namespace PicaStyle
 
